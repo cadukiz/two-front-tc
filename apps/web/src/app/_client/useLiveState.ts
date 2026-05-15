@@ -15,6 +15,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import {
   SseEventSchema,
   SSE_EVENT_TYPES,
+  type Config,
   type Snapshot,
   type SseEvent,
 } from "@twofront/domain";
@@ -25,7 +26,7 @@ const STREAM_URL = "/api/stream";
 
 function seedFromSnapshot(snapshot: Snapshot): LiveState {
   return liveReducer(
-    { tasks: [], emails: [], sms: [], lastSeq: 0 },
+    { tasks: [], emails: [], sms: [], lastSeq: 0, config: null },
     { type: "snapshot", seq: snapshot.lastSeq, data: snapshot },
   );
 }
@@ -34,6 +35,11 @@ export interface LiveStateResult {
   tasks: LiveState["tasks"];
   emails: LiveState["emails"];
   sms: LiveState["sms"];
+  /**
+   * Authoritative server config (read-only display, ADR-0008). Seeded from the
+   * SSR snapshot so it is non-null from the first paint.
+   */
+  config: Config;
   connection: Connection;
 }
 
@@ -93,6 +99,9 @@ export function useLiveState(initial: Snapshot): LiveStateResult {
     tasks: state.tasks,
     emails: state.emails,
     sms: state.sms,
+    // Seeded from `initial` on first render, then re-seeded by every snapshot;
+    // the `?? initial.config` keeps the contract non-null without a non-null `!`.
+    config: state.config ?? initial.config,
     connection,
   };
 }

@@ -22,11 +22,18 @@ import { useLiveState } from "./useLiveState";
 import { useFreshIds } from "./useFreshIds";
 import { AppHeader } from "../components/AppHeader";
 import { Panel, Empty } from "../components/Panel";
-import { IChecklist, IEnvelope, IFibonacci, IHand } from "../components/icons";
+import {
+  IChecklist,
+  IClock,
+  IEnvelope,
+  IFibonacci,
+  IHand,
+} from "../components/icons";
 import { AddTaskBar } from "../_components/AddTaskBar";
 import { TaskRow, CompletedRow } from "../_components/TaskRow";
 import { EmailCard } from "../_components/EmailCard";
 import { SmsBubble } from "../_components/SmsBubble";
+import { TimeControlsBox } from "../_components/TimeControlsBox";
 import { Toasts } from "../_components/Toasts";
 import type { Toast } from "../_components/Toasts";
 
@@ -37,7 +44,7 @@ interface WorkbenchProps {
 let toastSeq = 0;
 
 export function Workbench({ initial }: WorkbenchProps) {
-  const { tasks, emails, sms, connection } = useLiveState(initial);
+  const { tasks, emails, sms, config, connection } = useLiveState(initial);
 
   // Live ticking clock (client-only; avoids SSR hydration drift).
   const [now, setNow] = useState<number>(() => Date.now());
@@ -276,45 +283,68 @@ export function Workbench({ initial }: WorkbenchProps) {
             </div>
           </Panel>
 
-          {/* SMS */}
-          <Panel
-            kind="sms"
-            title="SMS"
-            count={sms.length}
-            icon={<IFibonacci />}
-            meta={
-              <>
-                Fibonacci
-                <span
-                  aria-hidden="true"
-                  className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
-                />
-                +1 (415) 555
-              </>
-            }
-          >
-            <div
-              className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3"
-              aria-live="polite"
-              aria-label="SMS messages"
-            >
-              {sms.length === 0 ? (
-                <Empty>
-                  <span className="em">No messages yet.</span>
-                  <br />
-                  Reminders fire on a Fibonacci cadence.
-                </Empty>
-              ) : (
-                sms.map((m) => (
-                  <SmsBubble
-                    key={m.id}
-                    msg={m}
-                    fresh={freshSms.has(m.id)}
+          {/* SMS + controls split (SMS left; Time-controls right) */}
+          <div className="grid min-h-0 grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-[18px] max-[920px]:grid-cols-1 max-[920px]:auto-rows-[minmax(280px,auto)] max-[720px]:gap-[14px]">
+            <Panel
+              kind="sms"
+              title="SMS"
+              count={sms.length}
+              icon={<IFibonacci />}
+              meta={
+                <>
+                  Fibonacci
+                  <span
+                    aria-hidden="true"
+                    className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
                   />
-                ))
-              )}
+                  +1 (415) 555
+                </>
+              }
+            >
+              <div
+                className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3"
+                aria-live="polite"
+                aria-label="SMS messages"
+              >
+                {sms.length === 0 ? (
+                  <Empty>
+                    <span className="em">No messages yet.</span>
+                    <br />
+                    Reminders fire on a Fibonacci cadence.
+                  </Empty>
+                ) : (
+                  sms.map((m) => (
+                    <SmsBubble
+                      key={m.id}
+                      msg={m}
+                      fresh={freshSms.has(m.id)}
+                    />
+                  ))
+                )}
+              </div>
+            </Panel>
+
+            {/* Controls column */}
+            <div className="grid min-h-0 auto-rows-min gap-[18px] max-[720px]:gap-[14px]">
+              <Panel
+                kind="time-controls"
+                title="Time controls"
+                icon={<IClock />}
+                meta={
+                  <>
+                    cadence
+                    <span
+                      aria-hidden="true"
+                      className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
+                    />
+                    server config
+                  </>
+                }
+              >
+                <TimeControlsBox config={config} />
+              </Panel>
             </div>
-          </Panel>
+          </div>
         </div>
       </div>
 

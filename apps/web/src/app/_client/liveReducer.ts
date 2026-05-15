@@ -7,7 +7,7 @@
  *
  * Types & schema come from `@twofront/domain` — never redefined here.
  */
-import type { Task, Email, Sms, SseEvent } from "@twofront/domain";
+import type { Task, Email, Sms, Config, SseEvent } from "@twofront/domain";
 
 export interface LiveState {
   tasks: Task[];
@@ -15,6 +15,13 @@ export interface LiveState {
   sms: Sms[];
   /** Highest `seq` applied so far — the reconnect dedupe key (ADR-0006 D5). */
   lastSeq: number;
+  /**
+   * Server-resolved runtime config (ADR-0004/0005), carried straight from the
+   * authoritative snapshot. Env-driven and read-only on the client — the
+   * time-controls panel renders it but can never mutate it (ADR-0008). `null`
+   * only before the first snapshot has seeded the state.
+   */
+  config: Config | null;
 }
 
 export const EMPTY_LIVE_STATE: LiveState = {
@@ -22,6 +29,7 @@ export const EMPTY_LIVE_STATE: LiveState = {
   emails: [],
   sms: [],
   lastSeq: 0,
+  config: null,
 };
 
 /** Newest-first by `seq` (display ordering key — never `createdAt`). */
@@ -59,6 +67,9 @@ export function liveReducer(state: LiveState, event: SseEvent): LiveState {
       emails: sortBySeqDesc(snap.emails),
       sms: sortBySeqDesc(snap.sms),
       lastSeq: snap.lastSeq,
+      // Authoritative, env-driven config — re-seeded with every snapshot
+      // (it never changes at runtime, ADR-0004/0005); the client only reads it.
+      config: snap.config,
     };
   }
 
