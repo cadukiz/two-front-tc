@@ -91,11 +91,7 @@ export function Panel({
         </div>
         {meta && (
           <div
-            className={`text-[11px] uppercase tracking-[0.16em] ${metaColor} [&_.dot]:mx-[8px] [&_.dot]:mb-[1px] [&_.dot]:inline-block [&_.dot]:h-[5px] [&_.dot]:w-[5px] [&_.dot]:rounded-full [&_.dot]:align-middle ${
-              isTasks
-                ? "[&_.dot]:bg-[rgba(42,31,15,0.45)]"
-                : "[&_.dot]:bg-teal"
-            }`}
+            className={`text-[11px] uppercase tracking-[0.16em] ${metaColor}`}
           >
             {meta}
           </div>

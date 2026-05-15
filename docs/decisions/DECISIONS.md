@@ -1,6 +1,11 @@
 # Decisions Log — TwoFront
 
-> Canonical decision log (ADR-style). **Every non-trivial technical/architectural decision is recorded here BEFORE it is finalized.** Format: Context → Options → Pros/Cons → Decision → Rationale. This is a required dev-cycle deliverable and a key interview handoff artifact — every decision must be defensible. Mirrored for handoff under `docs/decisions/`.
+> **Handoff mirror.** The canonical decision log lives in the planner workspace
+> (`notes/Decisions Log.md`); this file is the public-repo copy kept in sync at
+> each handoff. Every non-trivial technical/architectural decision is recorded
+> here BEFORE it is finalized. Format: Context → Options → Pros/Cons → Decision
+> → Rationale. This is a required dev-cycle deliverable and a key interview
+> handoff artifact — every decision must be defensible.
 
 ---
 
@@ -99,3 +104,25 @@
 **Decision (recommended, logged for override):** adopt all four into the contract — global monotonic **`seq`** as the feed ordering key (`createdAt` display-only), **idempotent complete** (no duplicate `task.completed`), **listener-attached-before-snapshot + `lastSeq` dedupe** on (re)connect (no replay buffer), per-listener broadcast isolation + heartbeat, bounded **last-200** per feed. `tc/packages/domain` is the **single source of truth** — frontend and E2E import its inferred types, zero parallel definitions.
 
 **Trade-off accepted:** ~15–20 extra lines + a `seq`/`lastSeq` field vs. eliminating timestamp-collision sort flake, double-emit corruption, and a lost-event reconnect race under compressed `TICK_MS`.
+
+---
+
+## ADR-0007 — Frontend styling: Tailwind-only (no bespoke CSS)
+
+**Context:** The Claude-Design frontend export (`tc/docs/twoFrontTasks.zip`) ships ~35 KB of hand-written `globals.css` (design tokens + component classes), Next 14 / React 18, `.jsx`. The brief explicitly **requires Tailwind**.
+
+**Options:** (a) keep the design's CSS as-is; (b) **re-express ALL styling in Tailwind**; (c) hybrid (Tailwind utilities + keep the CSS token layer).
+
+**Decision (user, firm): (b) — full Tailwind port. Zero bespoke component CSS.** The only stylesheet is the Tailwind entry (`@tailwind base/components/utilities`); the design's color/font/radius/shadow tokens and keyframes move into `tailwind.config.ts` `theme.extend`; fonts via `next/font`; every component styled exclusively with Tailwind utility classes. Components are ported `.jsx → .tsx` into the existing Next 15 / React 19 app.
+
+**Rationale:** "Our requirement is a requirement" — a stated hard constraint is not negotiable for visual convenience; the recommended hybrid was explicitly rejected. **Trade-off accepted:** significant port effort + visual-drift risk vs. literal brief compliance (verifiable: no non-Tailwind CSS in the app).
+
+---
+
+## ADR-0008 — Extra frontend features kept but deferred & non-authoritative
+
+**Context:** The design includes Pomodoro timer, Time-controls sliders, and drag-to-reorder — beyond the brief; partly conflict with the server-authoritative architecture (ADR-0002/0004).
+
+**Decision (user):** **Keep all three (they're already built, frontend-only) but as the LAST, OPTIONAL work** — done only if time remains after the brief + bonuses; safe to skip otherwise. They must be **non-authoritative**: drag-reorder = client-only cosmetic; Time-controls = read-only display of the real server config (not runtime mutation); Pomodoro = local render mute only (server keeps emitting; nothing about server state changes).
+
+**Rationale:** They add polish at zero architectural cost *if* presented as non-authoritative, but the brief + bonuses come first. **Trade-off accepted:** possible incomplete/omitted extras vs. guaranteed delivery of required scope. Sequenced as the final optional wave; never blocks submission.

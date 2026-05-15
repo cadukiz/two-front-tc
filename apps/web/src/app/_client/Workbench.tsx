@@ -100,7 +100,12 @@ export function Workbench({ initial }: WorkbenchProps) {
           icon={<IChecklist />}
           meta={
             <>
-              clipboard<span className="dot" />server-authoritative
+              clipboard
+              <span
+                aria-hidden="true"
+                className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-[rgba(42,31,15,0.45)] align-middle"
+              />
+              server-authoritative
             </>
           }
           clip
@@ -176,7 +181,12 @@ export function Workbench({ initial }: WorkbenchProps) {
             icon={<IEnvelope />}
             meta={
               <>
-                newest first<span className="dot" />auto-stream
+                newest first
+                <span
+                  aria-hidden="true"
+                  className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
+                />
+                auto-stream
               </>
             }
           >
@@ -274,7 +284,12 @@ export function Workbench({ initial }: WorkbenchProps) {
             icon={<IFibonacci />}
             meta={
               <>
-                Fibonacci<span className="dot" />+1 (415) 555
+                Fibonacci
+                <span
+                  aria-hidden="true"
+                  className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
+                />
+                +1 (415) 555
               </>
             }
           >

@@ -77,11 +77,7 @@ export function AddTaskBar({ onError }: AddTaskBarProps) {
   return (
     <>
       <form
-        className={`sticky top-0 z-[4] flex gap-[10px] border-b bg-transparent px-[18px] pb-3 pt-[14px] ${
-          err
-            ? "border-b-[rgba(60,40,20,0.14)]"
-            : "border-b-[rgba(60,40,20,0.14)]"
-        }`}
+        className="sticky top-0 z-[4] flex gap-[10px] border-b border-b-[rgba(60,40,20,0.14)] bg-transparent px-[18px] pb-3 pt-[14px]"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
