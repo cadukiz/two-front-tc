@@ -6,12 +6,13 @@
  * responsive layout (Tasks left; Emails + SMS stacked right; mobile-stacked;
  * each panel independently scrollable).
  *
- * Wave 6.1: the Tasks section is now the rich, real-API-wired UI
- * (`AddTaskBar` + `TaskRow` + `CompletedRow`). Emails / SMS keep the Wave-5
- * inline placeholder rows until Waves 6.2 / 6.3 swap in `EmailCard` /
- * `SmsBubble`. The server stays authoritative — actions POST and the result
- * reflects back through SSE; the only client-local state is the
- * arrival-highlight set and transient error toasts.
+ * Wave 6.2: the Tasks section (6.1) + the Emails section now use the rich
+ * real-API-wired UI (`AddTaskBar` + `TaskRow` + `CompletedRow` + `EmailCard`
+ * with the B2 complete-from-email round-trip). SMS keeps the Wave-5 inline
+ * placeholder until Wave 6.3 swaps in `SmsBubble`. The server stays
+ * authoritative — actions POST/GET and the result reflects back through SSE;
+ * the only client-local state is the arrival-highlight set, the (client-only)
+ * email filter, and transient error toasts.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Snapshot } from "@twofront/domain";
@@ -22,6 +23,7 @@ import { Panel, Empty } from "../components/Panel";
 import { IChecklist, IEnvelope, IFibonacci, IHand } from "../components/icons";
 import { AddTaskBar } from "../_components/AddTaskBar";
 import { TaskRow, CompletedRow } from "../_components/TaskRow";
+import { EmailCard } from "../_components/EmailCard";
 import { formatTime } from "../lib/format";
 
 interface WorkbenchProps {
@@ -65,10 +67,25 @@ export function Workbench({ initial }: WorkbenchProps) {
     () => tasks.filter((t) => t.status === "completed"),
     [tasks],
   );
+  const pendingIds = useMemo(
+    () => new Set(pending.map((t) => t.id)),
+    [pending],
+  );
 
   // Arrival highlights (client-only CSS class; server authoritative).
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
+  const emailIds = useMemo(() => emails.map((e) => e.id), [emails]);
   const freshTasks = useFreshIds(taskIds);
+  const freshEmails = useFreshIds(emailIds);
+
+  // Email type filter (client-only, retained from the design — harmless).
+  const [emailFilter, setEmailFilter] = useState<
+    "all" | "immediate" | "summary"
+  >("all");
+  const filteredEmails =
+    emailFilter === "all"
+      ? emails
+      : emails.filter((e) => e.kind === emailFilter);
 
   return (
     <div className="flex h-screen min-h-0 flex-col">
@@ -151,7 +168,7 @@ export function Workbench({ initial }: WorkbenchProps) {
 
         {/* ---------------- Right stack ---------------- */}
         <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-[18px] max-[720px]:gap-[14px]">
-          {/* Emails — Wave-5 placeholder until 6.2 swaps in EmailCard */}
+          {/* Emails */}
           <Panel
             kind="emails"
             title="Emails"
@@ -163,6 +180,59 @@ export function Workbench({ initial }: WorkbenchProps) {
               </>
             }
           >
+            <div className="flex items-center justify-between gap-[10px] px-4 pb-0 pt-[10px]">
+              <div
+                className="inline-flex gap-[2px] rounded-pill border border-line bg-card p-[3px] shadow-sm"
+                role="tablist"
+                aria-label="Filter emails by type"
+              >
+                {(
+                  [
+                    { id: "all", label: "All", count: emails.length },
+                    {
+                      id: "immediate",
+                      label: "Immediate",
+                      count: emails.filter((e) => e.kind === "immediate")
+                        .length,
+                    },
+                    {
+                      id: "summary",
+                      label: "Summary",
+                      count: emails.filter((e) => e.kind === "summary")
+                        .length,
+                    },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={emailFilter === opt.id}
+                    onClick={() => setEmailFilter(opt.id)}
+                    className={`inline-flex items-center gap-[6px] rounded-pill px-3 py-[5px] text-[12px] font-medium transition-[background,color] duration-150 motion-reduce:transition-none ${
+                      emailFilter === opt.id
+                        ? "bg-teal text-panel"
+                        : "text-ink-2 hover:text-teal"
+                    }`}
+                  >
+                    {opt.label}
+                    <span className="pl-[2px] text-[11px] opacity-75">
+                      {opt.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {emailFilter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setEmailFilter("all")}
+                  title="Clear filter"
+                  className="cursor-pointer border-none bg-none font-serif text-[11.5px] italic text-ink-3"
+                >
+                  clear filter
+                </button>
+              )}
+            </div>
             <div
               className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3"
               aria-live="polite"
@@ -174,33 +244,23 @@ export function Workbench({ initial }: WorkbenchProps) {
                   <br />
                   Add a task to trigger the first one.
                 </Empty>
+              ) : filteredEmails.length === 0 ? (
+                <Empty className="mt-1">
+                  <span className="em">Nothing here.</span>
+                  <br />
+                  No {emailFilter} emails yet.
+                </Empty>
               ) : (
-                emails.map((e) => (
-                  <article
+                filteredEmails.map((e) => (
+                  <EmailCard
                     key={e.id}
-                    className="overflow-hidden rounded-card border border-line-soft bg-card"
-                  >
-                    <div className="flex items-center gap-[10px] px-[14px] py-3">
-                      <span
-                        className={`flex-none rounded-pill px-[9px] py-[3px] text-[10.5px] font-semibold uppercase tracking-[0.08em] ${
-                          e.kind === "immediate"
-                            ? "bg-teal text-panel"
-                            : "bg-tan text-[#6e5a26]"
-                        }`}
-                      >
-                        {e.kind}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink-1">
-                        {e.subject}
-                      </span>
-                      <span className="flex-none text-[11.5px] text-ink-3">
-                        {formatTime(e.createdAt)}
-                      </span>
-                    </div>
-                    <p className="border-t border-dashed border-line-soft px-[14px] pb-[14px] pt-3 text-[13.5px] leading-[1.5] text-ink-2">
-                      {e.body}
-                    </p>
-                  </article>
+                    email={e}
+                    fresh={freshEmails.has(e.id)}
+                    taskStillPending={
+                      e.taskId != null && pendingIds.has(e.taskId)
+                    }
+                    onError={pushToast}
+                  />
                 ))
               )}
             </div>
