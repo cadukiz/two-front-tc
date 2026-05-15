@@ -16,3 +16,6 @@ blob-report/
 # Next.js / TypeScript generated
 next-env.d.ts
 *.tsbuildinfo
+.design-source/
+docs/twoFrontTasks.zip
+docs/_design-source/

@@ -1,3 +1,37 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ADR-0007 — the ONLY stylesheet. No design tokens, no component classes:
+   everything below is the minimal unavoidable base reset (body surface +
+   antialiasing + scrollbar tint). All design tokens live in
+   tailwind.config.ts; all component styling is Tailwind utilities. */
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-app text-ink-1 font-sans antialiased;
+    font-size: 14.5px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(15, 93, 74, 0.14);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(15, 93, 74, 0.24);
+  }
+}
