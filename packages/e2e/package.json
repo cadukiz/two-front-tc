@@ -1,0 +1,16 @@
+{
+  "name": "e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47",
+    "@twofront/domain": "workspace:*",
+    "@types/node": "^20",
+    "typescript": "^5.6.2"
+  }
+}
