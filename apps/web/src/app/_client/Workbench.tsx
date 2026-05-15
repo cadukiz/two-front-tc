@@ -6,21 +6,34 @@
  * responsive layout (Tasks left; Emails + SMS stacked right; mobile-stacked;
  * each panel independently scrollable).
  *
- * Wave 5 scope: real live data through minimal placeholder rows so the shell
- * is genuinely wired, NOT a mock. Rich `TaskRow` / `EmailCard` / `SmsBubble`
- * + add/complete actions land in Wave 6.
+ * Wave 6.1: the Tasks section is now the rich, real-API-wired UI
+ * (`AddTaskBar` + `TaskRow` + `CompletedRow`). Emails / SMS keep the Wave-5
+ * inline placeholder rows until Waves 6.2 / 6.3 swap in `EmailCard` /
+ * `SmsBubble`. The server stays authoritative — actions POST and the result
+ * reflects back through SSE; the only client-local state is the
+ * arrival-highlight set and transient error toasts.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Snapshot } from "@twofront/domain";
 import { useLiveState } from "./useLiveState";
+import { useFreshIds } from "./useFreshIds";
 import { AppHeader } from "../components/AppHeader";
 import { Panel, Empty } from "../components/Panel";
-import { IChecklist, IEnvelope, IFibonacci } from "../components/icons";
-import { relativeAge, formatTime } from "../lib/format";
+import { IChecklist, IEnvelope, IFibonacci, IHand } from "../components/icons";
+import { AddTaskBar } from "../_components/AddTaskBar";
+import { TaskRow, CompletedRow } from "../_components/TaskRow";
+import { formatTime } from "../lib/format";
 
 interface WorkbenchProps {
   initial: Snapshot;
 }
+
+interface ErrToast {
+  id: string;
+  text: string;
+}
+
+let toastSeq = 0;
 
 export function Workbench({ initial }: WorkbenchProps) {
   const { tasks, emails, sms, connection } = useLiveState(initial);
@@ -32,8 +45,30 @@ export function Workbench({ initial }: WorkbenchProps) {
     return () => clearInterval(id);
   }, []);
 
-  const pending = tasks.filter((t) => t.status === "pending");
-  const completed = tasks.filter((t) => t.status === "completed");
+  // Transient error toasts (AddTaskBar / complete failures). The ported
+  // `Toasts` component lands in Wave 6.3; for now a minimal inline host.
+  const [toasts, setToasts] = useState<ErrToast[]>([]);
+  const pushToast = useCallback((text: string): void => {
+    toastSeq += 1;
+    const id = `t${toastSeq}`;
+    setToasts((prev) => [...prev, { id, text }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3200);
+  }, []);
+
+  const pending = useMemo(
+    () => tasks.filter((t) => t.status === "pending"),
+    [tasks],
+  );
+  const completed = useMemo(
+    () => tasks.filter((t) => t.status === "completed"),
+    [tasks],
+  );
+
+  // Arrival highlights (client-only CSS class; server authoritative).
+  const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
+  const freshTasks = useFreshIds(taskIds);
 
   return (
     <div className="flex h-screen min-h-0 flex-col">
@@ -53,7 +88,13 @@ export function Workbench({ initial }: WorkbenchProps) {
           }
           clip
         >
-          <div className="px-[14px] pb-[18px] pt-[6px]">
+          <AddTaskBar onError={pushToast} />
+
+          <div
+            className="px-[14px] pb-[18px] pt-[6px]"
+            aria-live="polite"
+            aria-label="Tasks"
+          >
             <div className="flex items-baseline gap-[10px] px-2 pb-[10px] pt-[14px] font-serif text-[24px] italic leading-none tracking-[-0.012em] text-clip">
               <span>Pending</span>
               <span className="relative top-[2px] inline-grid h-[28px] min-w-[28px] place-items-center rounded-pill bg-[#3D423E] px-2 text-[12.5px] font-semibold not-italic text-[#FBF6E8]">
@@ -67,22 +108,25 @@ export function Workbench({ initial }: WorkbenchProps) {
                 Add one to see notifications fire.
               </Empty>
             ) : (
-              <ul className="flex flex-col gap-2">
-                {pending.map((t) => (
-                  <li
-                    key={t.id}
-                    title={t.title}
-                    className="flex items-center justify-between gap-[10px] rounded-row border border-[rgba(15,93,74,0.22)] bg-[rgba(255,253,244,0.35)] px-[14px] py-3"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[14.5px] font-medium text-ink-1">
-                      {t.title}
-                    </span>
-                    <span className="flex-none text-[12px] text-ink-3">
-                      {relativeAge(t.createdAt, now)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="relative mx-1 mb-[14px] mt-2 rounded-[6px] border border-[rgba(15,93,74,0.10)] bg-gradient-to-b from-[#FFFDF6] via-[#FFFFFF] to-[#FFFFFF] shadow-[0_1px_0_rgba(255,255,255,0.65)_inset,0_2px_4px_rgba(15,93,74,0.08),0_14px_24px_-12px_rgba(15,93,74,0.22)]">
+                <div className="relative px-[6px] pb-[10px] pt-3">
+                  {pending.length > 1 && (
+                    <div className="flex items-center gap-[9px] px-3 pb-3 pt-1 font-serif text-[15px] italic text-teal-900 opacity-90 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-teal [&_svg]:opacity-85">
+                      <IHand /> drag any task to reorder &mdash; top is highest
+                      priority
+                    </div>
+                  )}
+                  {pending.map((t) => (
+                    <TaskRow
+                      key={t.id}
+                      task={t}
+                      now={now}
+                      fresh={freshTasks.has(t.id)}
+                      onError={pushToast}
+                    />
+                  ))}
+                </div>
+              </div>
             )}
 
             <div className="mt-[18px] flex items-baseline gap-[10px] px-2 pb-[10px] pt-[14px] font-serif text-[24px] italic leading-none tracking-[-0.012em] text-clip">
@@ -94,31 +138,20 @@ export function Workbench({ initial }: WorkbenchProps) {
             {completed.length === 0 ? (
               <Empty>Nothing completed yet.</Empty>
             ) : (
-              <ul className="flex flex-col">
-                {completed.map((t) => (
-                  <li
-                    key={t.id}
-                    title={t.title}
-                    className="flex items-center justify-between gap-3 px-[18px] py-3"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[14.5px] text-ink-3 line-through decoration-[rgba(14,92,71,0.7)] decoration-2">
-                      {t.title}
-                    </span>
-                    <span className="flex-none text-[12px] text-ink-3">
-                      {t.completedAt != null
-                        ? formatTime(t.completedAt)
-                        : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="relative mx-1 mb-[14px] mt-2 rounded-[6px] border border-[rgba(15,93,74,0.10)] bg-gradient-to-b from-[#FFFDF6] via-[#FFFFFF] to-[#FFFFFF] shadow-[0_1px_0_rgba(255,255,255,0.65)_inset,0_2px_4px_rgba(15,93,74,0.08),0_14px_24px_-12px_rgba(15,93,74,0.22)]">
+                <div className="relative py-2">
+                  {completed.map((t) => (
+                    <CompletedRow key={t.id} task={t} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </Panel>
 
         {/* ---------------- Right stack ---------------- */}
         <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-[18px] max-[720px]:gap-[14px]">
-          {/* Emails */}
+          {/* Emails — Wave-5 placeholder until 6.2 swaps in EmailCard */}
           <Panel
             kind="emails"
             title="Emails"
@@ -130,7 +163,11 @@ export function Workbench({ initial }: WorkbenchProps) {
               </>
             }
           >
-            <div className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3">
+            <div
+              className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3"
+              aria-live="polite"
+              aria-label="Emails"
+            >
               {emails.length === 0 ? (
                 <Empty>
                   <span className="em">No emails yet.</span>
@@ -169,7 +206,7 @@ export function Workbench({ initial }: WorkbenchProps) {
             </div>
           </Panel>
 
-          {/* SMS */}
+          {/* SMS — Wave-5 placeholder until 6.3 swaps in SmsBubble */}
           <Panel
             kind="sms"
             title="SMS"
@@ -181,7 +218,11 @@ export function Workbench({ initial }: WorkbenchProps) {
               </>
             }
           >
-            <div className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3">
+            <div
+              className="flex flex-col gap-[10px] px-4 pb-[18px] pt-3"
+              aria-live="polite"
+              aria-label="SMS messages"
+            >
               {sms.length === 0 ? (
                 <Empty>
                   <span className="em">No messages yet.</span>
@@ -206,6 +247,22 @@ export function Workbench({ initial }: WorkbenchProps) {
             </div>
           </Panel>
         </div>
+      </div>
+
+      {/* Inline toast host (replaced by the ported `Toasts` in Wave 6.3). */}
+      <div
+        className="pointer-events-none fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 flex-col gap-2"
+        aria-live="polite"
+      >
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            className="pointer-events-auto rounded-pill bg-rust px-4 py-[10px] text-[13px] text-panel shadow-lg animate-enter-top motion-reduce:animate-none"
+          >
+            {t.text}
+          </div>
+        ))}
       </div>
     </div>
   );

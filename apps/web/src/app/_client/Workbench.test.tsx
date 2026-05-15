@@ -89,4 +89,39 @@ describe("Workbench smoke render", () => {
     const text = mount(<Workbench initial={seeded} />);
     expect(text).toContain("Seeded pending task");
   });
+
+  it("orders the SMS feed newest-first by seq (never createdAt)", () => {
+    const now = Date.now();
+    const seeded: Snapshot = {
+      ...emptySnapshot,
+      sms: [
+        // Lower seq but the NEWEST createdAt — must still sort below seq 9.
+        {
+          id: "10000000-0000-0000-0000-000000000001",
+          seq: 2,
+          body: "OLDER-BY-SEQ",
+          pendingTitles: [],
+          fibCycle: 0,
+          fibIndex: 1,
+          fibMinute: 1,
+          createdAt: now + 999_999,
+        },
+        {
+          id: "10000000-0000-0000-0000-000000000002",
+          seq: 9,
+          body: "NEWER-BY-SEQ",
+          pendingTitles: [],
+          fibCycle: 0,
+          fibIndex: 2,
+          fibMinute: 1,
+          createdAt: now,
+        },
+      ],
+      lastSeq: 9,
+    };
+    const text = mount(<Workbench initial={seeded} />);
+    expect(text.indexOf("NEWER-BY-SEQ")).toBeLessThan(
+      text.indexOf("OLDER-BY-SEQ"),
+    );
+  });
 });
