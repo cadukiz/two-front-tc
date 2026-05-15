@@ -108,7 +108,7 @@ sequenceDiagram
   API-->>C: 201 CreateTaskResponse (Zod-validated)
   H-->>R: SSE task.created (id:n)
   H-->>R: SSE email.created (id:n+1)
-  R->>R: drop if seq<=lastSeq; upsert by id; sort seq-desc
+  R->>R: drop if seq<=lastSeq, upsert by id, sort seq-desc
   R-->>C: re-render Tasks + Emails panels
   Note over C: No optimistic temp row — the authoritative<br/>row arrives via SSE on the same in-process store.
 ```
@@ -141,7 +141,7 @@ sequenceDiagram
   end
   G-->>C: 200 HTML confirmation (works in any mail client)
   H-->>C: SSE task.completed
-  Note over C: Task moves Pending→Completed; the email's<br/>action flips to disabled "Completed".
+  Note over C: Task moves Pending→Completed — the email's<br/>action flips to disabled "Completed".
 ```
 
 ---
@@ -241,11 +241,11 @@ sequenceDiagram
   Note over SSE: scheduler may emit here…
   SSE-->>C: event: email.created (id: lastSeq+1)
   C->>C: seed from snapshot (lastSeq)
-  C->>C: delta id<=lastSeq → drop; else upsert+bump
+  C->>C: delta id<=lastSeq → drop, else upsert+bump
   loop every ~15s wall-time
     SSE-->>C: ":\n\n" heartbeat (independent of TICK_MS)
   end
-  Note over C,SSE: EventSource auto-reconnects;<br/>fresh snapshot + lastSeq dedupe<br/>recovers cleanly — no replay buffer.
+  Note over C,SSE: EventSource auto-reconnects —<br/>fresh snapshot + lastSeq dedupe<br/>recovers cleanly — no replay buffer.
 ```
 
 ---
