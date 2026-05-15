@@ -28,14 +28,19 @@ import {
   IEnvelope,
   IFibonacci,
   IHand,
+  ITomato,
 } from "../components/icons";
 import { AddTaskBar } from "../_components/AddTaskBar";
 import { TaskRow, CompletedRow } from "../_components/TaskRow";
 import { EmailCard } from "../_components/EmailCard";
 import { SmsBubble } from "../_components/SmsBubble";
 import { TimeControlsBox } from "../_components/TimeControlsBox";
+import { PomodoroBox } from "../_components/PomodoroBox";
+import { usePomodoro } from "./usePomodoro";
 import { Toasts } from "../_components/Toasts";
 import type { Toast } from "../_components/Toasts";
+
+const EMPTY_FRESH: ReadonlySet<string> = new Set<string>();
 
 interface WorkbenchProps {
   initial: Snapshot;
@@ -52,6 +57,13 @@ export function Workbench({ initial }: WorkbenchProps) {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Pomodoro focus mode (ADR-0008): purely local render-mute. It pauses
+  // NOTHING server-side — `useLiveState` / the reducer / EventSource keep
+  // running and the feeds keep updating while `pomodoro.active`. We only
+  // suppress the visual notification noise (arrival highlights + toasts).
+  const pomodoro = usePomodoro();
+  const muted = pomodoro.active;
 
   // Transient error toasts (AddTaskBar / complete failures).
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -81,9 +93,15 @@ export function Workbench({ initial }: WorkbenchProps) {
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
   const emailIds = useMemo(() => emails.map((e) => e.id), [emails]);
   const smsIds = useMemo(() => sms.map((m) => m.id), [sms]);
-  const freshTasks = useFreshIds(taskIds);
-  const freshEmails = useFreshIds(emailIds);
-  const freshSms = useFreshIds(smsIds);
+  // These keep tracking arrivals truthfully (server-authoritative); focus mode
+  // only *suppresses the highlight at render time* by presenting empty sets —
+  // the feeds themselves are already updated underneath.
+  const freshTasksReal = useFreshIds(taskIds);
+  const freshEmailsReal = useFreshIds(emailIds);
+  const freshSmsReal = useFreshIds(smsIds);
+  const freshTasks = muted ? EMPTY_FRESH : freshTasksReal;
+  const freshEmails = muted ? EMPTY_FRESH : freshEmailsReal;
+  const freshSms = muted ? EMPTY_FRESH : freshSmsReal;
 
   // Email type filter (client-only, retained from the design — harmless).
   const [emailFilter, setEmailFilter] = useState<
@@ -327,6 +345,31 @@ export function Workbench({ initial }: WorkbenchProps) {
             {/* Controls column */}
             <div className="grid min-h-0 auto-rows-min gap-[18px] max-[720px]:gap-[14px]">
               <Panel
+                kind="pomodoro"
+                title="Pomodoro"
+                icon={<ITomato size={24} />}
+                meta={
+                  <>
+                    focus
+                    <span
+                      aria-hidden="true"
+                      className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
+                    />
+                    mute locally
+                  </>
+                }
+              >
+                <PomodoroBox
+                  active={pomodoro.active}
+                  remainingMs={pomodoro.remainingMs}
+                  durationMin={pomodoro.durationMin}
+                  totalMs={pomodoro.totalMs}
+                  onStart={pomodoro.start}
+                  onStop={pomodoro.stop}
+                  onSetDuration={pomodoro.setDuration}
+                />
+              </Panel>
+              <Panel
                 kind="time-controls"
                 title="Time controls"
                 icon={<IClock />}
@@ -348,7 +391,9 @@ export function Workbench({ initial }: WorkbenchProps) {
         </div>
       </div>
 
-      <Toasts items={toasts} onDismiss={dismissToast} />
+      {/* Focus mode suppresses toast popups (the queue is untouched — nothing
+          is lost; the server is unaffected). They resume when focus ends. */}
+      <Toasts items={muted ? [] : toasts} onDismiss={dismissToast} />
     </div>
   );
 }
