@@ -1,0 +1,27 @@
+{
+  "name": "@twofront/domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Single source of truth for the TwoFront challenge: Zod schemas, inferred types, the pure Fibonacci generator, and the time/reset config. The frontend and Playwright E2E import from here — no parallel type definitions anywhere.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}
