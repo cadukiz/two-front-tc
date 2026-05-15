@@ -187,6 +187,21 @@ describe("createStore — snapshot", () => {
     const minRetainedSeq = Math.min(...snap.sms.map((s) => s.seq));
     expect(minRetainedSeq).toBe(51);
   });
+
+  it("evicts on push: the internal array stays ≤200 independently of snapshot() slicing", () => {
+    const store = createStore(CONFIG);
+    for (let i = 0; i < 250; i += 1) {
+      store.appendSms({ fibIndex: 1, fibMinute: 1 });
+    }
+    // Probe the raw internal array length — NOT routed through snapshot()'s
+    // newest-first slice. If eviction were only happening at snapshot time the
+    // internal array would be 250; on-push eviction keeps it bounded at 200.
+    const lengths = store.__internalFeedLengths();
+    expect(lengths.sms).toBe(200);
+    expect(lengths.sms).toBeLessThanOrEqual(200);
+    // And the slice-based view agrees.
+    expect(store.snapshot().sms).toHaveLength(200);
+  });
 });
 
 describe("createStore — pub/sub", () => {

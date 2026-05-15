@@ -27,6 +27,8 @@ import { NotFoundError, ValidationError } from "./errors";
 const FEED_CAP = 200;
 
 export interface Store {
+  /** Resolved runtime config — read by the scheduler for `tickMs`/reset windows. */
+  readonly config: Config;
   addTask(title: string): { task: Task; email: Email };
   completeTask(id: string): { task: Task };
   appendSummaryEmail(): Email;
@@ -37,6 +39,12 @@ export interface Store {
   getEmailCycle(): number;
   snapshot(): Snapshot;
   subscribe(fn: (e: SseEvent) => void): () => void;
+  /**
+   * Test-only probe: the *internal* (pre-`snapshot()`-slice) array lengths.
+   * Proves on-push eviction keeps memory bounded independently of the
+   * newest-first slice in `snapshot()` (ADR-0006 D7). Not used at runtime.
+   */
+  __internalFeedLengths(): { tasks: number; emails: number; sms: number };
 }
 
 /**
@@ -87,6 +95,7 @@ export function createStore(config: Config): Store {
       : titles.map((t) => `- ${t}`).join("\n");
 
   return {
+    config,
     addTask(rawTitle: string): { task: Task; email: Email } {
       const parsed = CreateTaskRequestSchema.safeParse({ title: rawTitle });
       if (!parsed.success) {
@@ -220,6 +229,10 @@ export function createStore(config: Config): Store {
       return () => {
         listeners.delete(fn);
       };
+    },
+
+    __internalFeedLengths(): { tasks: number; emails: number; sms: number } {
+      return { tasks: tasks.length, emails: emails.length, sms: sms.length };
     },
   };
 }
