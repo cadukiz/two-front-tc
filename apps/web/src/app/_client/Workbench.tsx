@@ -6,13 +6,15 @@
  * responsive layout (Tasks left; Emails + SMS stacked right; mobile-stacked;
  * each panel independently scrollable).
  *
- * Wave 6.2: the Tasks section (6.1) + the Emails section now use the rich
- * real-API-wired UI (`AddTaskBar` + `TaskRow` + `CompletedRow` + `EmailCard`
- * with the B2 complete-from-email round-trip). SMS keeps the Wave-5 inline
- * placeholder until Wave 6.3 swaps in `SmsBubble`. The server stays
- * authoritative — actions POST/GET and the result reflects back through SSE;
- * the only client-local state is the arrival-highlight set, the (client-only)
- * email filter, and transient error toasts.
+ * Wave 6.3: all three sections are now the rich, real-API-wired UI
+ * (`AddTaskBar` + `TaskRow` + `CompletedRow` + `EmailCard` + `SmsBubble`)
+ * plus the ported `Toasts` host. The server stays authoritative — actions
+ * POST/GET and the result reflects back through SSE; the only client-local
+ * state is the arrival-highlight set, the (client-only) email filter, and
+ * transient error toasts. Cross-cutting a11y: each feed region is
+ * `aria-live="polite"`, animations respect `prefers-reduced-motion` via the
+ * Tailwind `motion-reduce:` variant, and the `AppHeader` connection pill
+ * reflects the live `useLiveState` connection state.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Snapshot } from "@twofront/domain";
@@ -24,15 +26,12 @@ import { IChecklist, IEnvelope, IFibonacci, IHand } from "../components/icons";
 import { AddTaskBar } from "../_components/AddTaskBar";
 import { TaskRow, CompletedRow } from "../_components/TaskRow";
 import { EmailCard } from "../_components/EmailCard";
-import { formatTime } from "../lib/format";
+import { SmsBubble } from "../_components/SmsBubble";
+import { Toasts } from "../_components/Toasts";
+import type { Toast } from "../_components/Toasts";
 
 interface WorkbenchProps {
   initial: Snapshot;
-}
-
-interface ErrToast {
-  id: string;
-  text: string;
 }
 
 let toastSeq = 0;
@@ -47,16 +46,15 @@ export function Workbench({ initial }: WorkbenchProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Transient error toasts (AddTaskBar / complete failures). The ported
-  // `Toasts` component lands in Wave 6.3; for now a minimal inline host.
-  const [toasts, setToasts] = useState<ErrToast[]>([]);
+  // Transient error toasts (AddTaskBar / complete failures).
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const pushToast = useCallback((text: string): void => {
     toastSeq += 1;
     const id = `t${toastSeq}`;
-    setToasts((prev) => [...prev, { id, text }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+    setToasts((prev) => [...prev, { id, text, kind: "err" }]);
+  }, []);
+  const dismissToast = useCallback((id: string): void => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const pending = useMemo(
@@ -75,8 +73,10 @@ export function Workbench({ initial }: WorkbenchProps) {
   // Arrival highlights (client-only CSS class; server authoritative).
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
   const emailIds = useMemo(() => emails.map((e) => e.id), [emails]);
+  const smsIds = useMemo(() => sms.map((m) => m.id), [sms]);
   const freshTasks = useFreshIds(taskIds);
   const freshEmails = useFreshIds(emailIds);
+  const freshSms = useFreshIds(smsIds);
 
   // Email type filter (client-only, retained from the design — harmless).
   const [emailFilter, setEmailFilter] = useState<
@@ -266,7 +266,7 @@ export function Workbench({ initial }: WorkbenchProps) {
             </div>
           </Panel>
 
-          {/* SMS — Wave-5 placeholder until 6.3 swaps in SmsBubble */}
+          {/* SMS */}
           <Panel
             kind="sms"
             title="SMS"
@@ -291,17 +291,11 @@ export function Workbench({ initial }: WorkbenchProps) {
                 </Empty>
               ) : (
                 sms.map((m) => (
-                  <div key={m.id} className="flex flex-col items-start gap-1">
-                    <div className="max-w-[92%] whitespace-pre-line rounded-[18px_18px_18px_6px] border border-line-soft bg-card px-[14px] py-3 text-[13.5px] leading-[1.5] text-ink-1 shadow-sm">
-                      <div className="mb-[6px] flex items-center gap-2 font-mono text-[11px] text-ink-3 before:h-[6px] before:w-[6px] before:rounded-full before:bg-teal">
-                        +1 (415) 555-TASK
-                      </div>
-                      {m.body}
-                    </div>
-                    <div className="pl-[14px] text-[11px] text-ink-3">
-                      {formatTime(m.createdAt)}
-                    </div>
-                  </div>
+                  <SmsBubble
+                    key={m.id}
+                    msg={m}
+                    fresh={freshSms.has(m.id)}
+                  />
                 ))
               )}
             </div>
@@ -309,21 +303,7 @@ export function Workbench({ initial }: WorkbenchProps) {
         </div>
       </div>
 
-      {/* Inline toast host (replaced by the ported `Toasts` in Wave 6.3). */}
-      <div
-        className="pointer-events-none fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 flex-col gap-2"
-        aria-live="polite"
-      >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className="pointer-events-auto rounded-pill bg-rust px-4 py-[10px] text-[13px] text-panel shadow-lg animate-enter-top motion-reduce:animate-none"
-          >
-            {t.text}
-          </div>
-        ))}
-      </div>
+      <Toasts items={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
