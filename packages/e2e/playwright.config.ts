@@ -1,6 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
+ * SERIAL BY DESIGN. The app under test is a single shared in-memory store
+ * (`globalThis`) fronted by one SSE stream — there is exactly one server and
+ * one mutable global state for the whole suite. The two stateful specs both
+ * drive and assert on that same store/stream, so running them in parallel
+ * (`fullyParallel` / multiple workers) makes them race on shared global
+ * state, producing ~10% flakes. The correct design for an inherently
+ * shared-state integration suite is serial execution, not a hack: hence
+ * `fullyParallel: false` + `workers: 1`. Deterministic > fast for a stateful
+ * integration suite.
+ *
  * Playwright config. POM (`pages/`) + the Wave 7 bonus specs (`tests/`) drive
  * the app under a compressed time model so the 1-minute summary-email cadence
  * and the Fibonacci SMS gaps are observable in E2E (ADR-0004).
@@ -34,7 +44,11 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "tests",
-  fullyParallel: true,
+  // Serial by design — see top-of-file note. Both specs share one server +
+  // one in-memory store + one SSE stream; parallel runs race on that global
+  // state. Single worker, no intra-file parallelism.
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: "html",
