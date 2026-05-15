@@ -37,6 +37,12 @@ import { SmsBubble } from "../_components/SmsBubble";
 import { TimeControlsBox } from "../_components/TimeControlsBox";
 import { PomodoroBox } from "../_components/PomodoroBox";
 import { usePomodoro } from "./usePomodoro";
+import {
+  applyPendingOrder,
+  prunePendingOrder,
+  reorderPending,
+  type PendingOrder,
+} from "./pendingOrder";
 import { Toasts } from "../_components/Toasts";
 import type { Toast } from "../_components/Toasts";
 
@@ -87,6 +93,93 @@ export function Workbench({ initial }: WorkbenchProps) {
   const pendingIds = useMemo(
     () => new Set(pending.map((t) => t.id)),
     [pending],
+  );
+
+  // ---- Wave 9.3: client-only, NON-PERSISTENT drag prioritization (ADR-0008).
+  // A local order overlay on the *pending* list only. The server's `seq` order
+  // stays the truth — this never POSTs, never persists (refresh restores
+  // `seq`), and leaves completed/emails/SMS strictly `seq`-driven. SSE updates
+  // are never broken by it (the overlay is a pure function of live `pending`).
+  const [pendingOrder, setPendingOrder] = useState<PendingOrder>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    edge: "before" | "after";
+  } | null>(null);
+
+  // Drop ids whose task left (completed/removed) so the order resets sensibly
+  // and can't grow unbounded. Runs after SSE-driven `pending` changes.
+  useEffect(() => {
+    setPendingOrder((prev) => prunePendingOrder(prev, pending));
+  }, [pending]);
+
+  const displayedPending = useMemo(
+    () => applyPendingOrder(pending, pendingOrder),
+    [pending, pendingOrder],
+  );
+
+  const commitReorder = useCallback(
+    (fromId: string, toId: string, edge: "before" | "after"): void => {
+      setPendingOrder((prev) =>
+        reorderPending(prev, pending, fromId, toId, edge),
+      );
+    },
+    [pending],
+  );
+
+  const handleDragStart = useCallback((id: string): void => {
+    setDragId(id);
+  }, []);
+  const handleDragOver = useCallback(
+    (id: string, edge: "before" | "after"): void => {
+      setDropTarget((prev) =>
+        prev && prev.id === id && prev.edge === edge ? prev : { id, edge },
+      );
+    },
+    [],
+  );
+  const handleDragLeave = useCallback((id: string): void => {
+    setDropTarget((prev) => (prev && prev.id === id ? null : prev));
+  }, []);
+  const handleDrop = useCallback(
+    (fromId: string, toId: string): void => {
+      setDropTarget((prev) => {
+        commitReorder(fromId, toId, prev?.edge ?? "before");
+        return null;
+      });
+      setDragId(null);
+    },
+    [commitReorder],
+  );
+  const handleDragEnd = useCallback((): void => {
+    setDragId(null);
+    setDropTarget(null);
+  }, []);
+
+  // Keyboard reorder: move a row one slot toward the list top/bottom in the
+  // currently-displayed sequence (same overlay, non-persistent).
+  const handleMove = useCallback(
+    (id: string, dir: "up" | "down"): void => {
+      const seqIds = applyPendingOrder(pending, pendingOrder).map(
+        (t) => t.id,
+      );
+      const idx = seqIds.indexOf(id);
+      if (idx === -1) return;
+      const swapIdx = dir === "up" ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= seqIds.length) return;
+      const neighbor = seqIds[swapIdx];
+      if (neighbor === undefined) return;
+      setPendingOrder((prev) =>
+        reorderPending(
+          prev,
+          pending,
+          id,
+          neighbor,
+          dir === "up" ? "before" : "after",
+        ),
+      );
+    },
+    [pending, pendingOrder],
   );
 
   // Arrival highlights (client-only CSS class; server authoritative).
@@ -161,15 +254,28 @@ export function Workbench({ initial }: WorkbenchProps) {
                     <div className="flex items-center gap-[9px] px-3 pb-3 pt-1 font-serif text-[15px] italic text-teal-900 opacity-90 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-teal [&_svg]:opacity-85">
                       <IHand /> drag any task to reorder &mdash; top is highest
                       priority
+                      <span className="ml-[6px] not-italic text-[11px] uppercase tracking-[0.14em] text-ink-3">
+                        local only · not saved
+                      </span>
                     </div>
                   )}
-                  {pending.map((t) => (
+                  {displayedPending.map((t) => (
                     <TaskRow
                       key={t.id}
                       task={t}
                       now={now}
                       fresh={freshTasks.has(t.id)}
                       onError={pushToast}
+                      isDragging={dragId === t.id}
+                      dropEdge={
+                        dropTarget?.id === t.id ? dropTarget.edge : null
+                      }
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                      onMove={handleMove}
                     />
                   ))}
                 </div>
