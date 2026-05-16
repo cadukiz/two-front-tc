@@ -509,16 +509,6 @@ export function Workbench({ initial }: WorkbenchProps) {
                 kind="time-controls"
                 title="Time controls"
                 icon={<IClock />}
-                meta={
-                  <>
-                    cadence
-                    <span
-                      aria-hidden="true"
-                      className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
-                    />
-                    all clients
-                  </>
-                }
               >
                 <TimeControlsBox
                   config={config}

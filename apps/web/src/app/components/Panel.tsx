@@ -32,6 +32,12 @@ export function Panel({
   children,
 }: PanelProps) {
   const isTasks = kind === "tasks";
+  // Wave 15 — Pomodoro "tomato" header icon enlarged +50% (the only panel
+  // icon resized). The shared non-tasks clamp is `h-[20px]/max-w-[30px]`;
+  // for `kind="pomodoro"` that scales to `h-[30px]/max-w-[45px]` (×1.5). No
+  // other panel icon (Emails / SMS / Time controls) or the Wave-14 countdown
+  // ring changes — those keep the shared 20px clamp.
+  const isPomodoro = kind === "pomodoro";
 
   const surface = isTasks
     ? "bg-clipboard border-[rgba(60,40,20,0.16)] shadow-clipboard pt-[38px]"
@@ -70,6 +76,8 @@ export function Panel({
                 isTasks
                   ? "top-[8px] [&_svg]:h-[26px] [&_svg]:max-w-[38px]"
                   : ""
+              } ${
+                isPomodoro ? "[&_svg]:h-[30px] [&_svg]:max-w-[45px]" : ""
               }`}
             >
               {icon}

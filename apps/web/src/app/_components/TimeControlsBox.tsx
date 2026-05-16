@@ -20,6 +20,11 @@
  * `onError` (toast). Slider visuals are ported from the design source as
  * Tailwind utilities (4 px track, round teal thumb), not bespoke CSS.
  *
+ * Wave 15: the explanatory "Server-authoritative — changes apply to every
+ * connected client" caption line was removed (it wrapped the panel header to
+ * two lines); the server-authoritative behaviour itself is unchanged — only
+ * the descriptive copy is gone. The two sliders are untouched.
+ *
  * Types come from `@twofront/domain` (no parallel def).
  */
 import { useEffect, useRef, useState } from "react";
@@ -155,9 +160,6 @@ export function TimeControlsBox({
           </div>
         );
       })}
-      <p className="font-serif text-[12px] italic leading-snug text-ink-3">
-        Server-authoritative — changes apply to every connected client.
-      </p>
     </div>
   );
 }
