@@ -59,7 +59,7 @@ describe("SmsBubble", () => {
     expect(text).toContain("Approve invoice");
     expect(text).toContain("Confirm vendor");
     expect(text).toContain("Fibonacci #4");
-    expect(text).toContain("every 3m");
+    expect(text).toContain("Next message in 3m");
     // formatDateTime → short month present
     const month = new Date(baseSms.createdAt).toLocaleString("en-US", {
       month: "short",

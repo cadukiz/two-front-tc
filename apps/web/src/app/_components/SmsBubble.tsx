@@ -10,6 +10,7 @@
  * meta line shows `formatDateTime(createdAt)` plus an informational Fibonacci
  * caption derived from the contract fields `fibIndex` / `fibMinute`.
  */
+import { memo } from "react";
 import type { Sms } from "@twofront/domain";
 import { formatDateTime } from "../lib/format";
 
@@ -19,7 +20,11 @@ interface SmsBubbleProps {
   fresh: boolean;
 }
 
-export function SmsBubble({ msg, fresh }: SmsBubbleProps) {
+// SSE-driven, no polling: an `SmsBubble` only changes when its `msg`/`fresh`
+// props change. `memo` so the Workbench's 1-second `now` clock (for the live
+// task age elsewhere) never re-renders the SMS feed — props here never derive
+// from `now`, so a tick is a strict no-op.
+function SmsBubbleImpl({ msg, fresh }: SmsBubbleProps) {
   const hasTitles = msg.pendingTitles.length > 0;
 
   return (
@@ -62,9 +67,12 @@ export function SmsBubble({ msg, fresh }: SmsBubbleProps) {
           {formatDateTime(msg.createdAt)}
         </span>
         <span className="font-serif text-[12.5px] italic text-teal">
-          Fibonacci #{msg.fibIndex} &middot; every {msg.fibMinute}m
+          Fibonacci #{msg.fibIndex} - Next message in {msg.fibMinute}m
         </span>
       </div>
     </div>
   );
 }
+
+/** Memoized — see the note above `SmsBubbleImpl` (SSE-driven; no `now`). */
+export const SmsBubble = memo(SmsBubbleImpl);

@@ -29,10 +29,10 @@ import { defineConfig, devices } from "@playwright/test";
  *    the page stays responsive for the whole run. The schedule is still fully
  *    observed: SMS land at cumulative minutes 1,2,4,7,12 → 1/2/4/7/12 s; the
  *    first summary email ≈ 1 s.
- *  - `EMAIL_SUMMARY_INTERVAL_MINUTES=1` / `SMS_BASE_INTERVAL_MINUTES=1`
- *    (ADR-0009 defaults) → the cadence is *identical* to the pre-Wave-10
- *    behaviour the Wave-7 specs were written against: summary every minute,
- *    SMS gaps 1,1,2,3,5,8…. Only the contract rename forced this change.
+ *  - `EMAIL_SUMMARY_INTERVAL_MINUTES=1` (ADR-0009 default) → the cadence is
+ *    *identical* to the pre-Wave-10 behaviour the Wave-7 specs were written
+ *    against: summary every minute, SMS gaps 1,1,2,3,5,8… (the SMS Fibonacci
+ *    pace is not configurable — it is always the natural F(k) minutes).
  *  - `FIBONACCI_RESET_DAYS=1` (ADR-0009; 1 day = 1440 minutes ⇒ a reset at
  *    1440 s here). That is FAR beyond the whole-suite horizon (≈30 s), so the
  *    natural Fibonacci sequence runs uninterrupted with no reset — exactly
@@ -72,9 +72,10 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       // See the time-model tuning note above (Wave 7/10 determinism, ADR-0009).
+      // TICK_MS compression is the SANCTIONED test-only use — the app itself
+      // always runs at 1 real minute (60000); only this E2E suite overrides it.
       TICK_MS: "1000",
       EMAIL_SUMMARY_INTERVAL_MINUTES: "1",
-      SMS_BASE_INTERVAL_MINUTES: "1",
       FIBONACCI_RESET_DAYS: "1",
     },
   },

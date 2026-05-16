@@ -108,7 +108,6 @@ const snapshot: Snapshot = {
   lastSeq: 5,
   config: {
     emailSummaryIntervalMinutes: 1,
-    smsBaseIntervalMinutes: 1,
     fibonacciResetDays: 1,
   },
 };

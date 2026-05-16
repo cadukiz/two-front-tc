@@ -11,7 +11,6 @@ import { createScheduler } from "./scheduler";
 const CONFIG: Config = {
   tickMs: 60,
   emailSummaryIntervalMinutes: 1,
-  smsBaseIntervalMinutes: 1,
   fibonacciResetDays: 100,
 };
 
@@ -56,7 +55,7 @@ describe("createScheduler — summary email cadence (ADR-0009)", () => {
 });
 
 describe("createScheduler — Fibonacci SMS cadence (ADR-0004/0009)", () => {
-  it("sends SMS at cumulative minutes 1,2,4,7,12,20 with correct fibIndex/fibMinute (base 1)", () => {
+  it("sends SMS at cumulative minutes 1,2,4,7,12,20 with correct fibIndex/fibMinute", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
 
@@ -93,16 +92,13 @@ describe("createScheduler — Fibonacci SMS cadence (ADR-0004/0009)", () => {
     expect(store.snapshot().sms).toHaveLength(3);
   });
 
-  it("scales the SMS gaps by smsBaseIntervalMinutes (base 2 ⇒ sends at 2,4,8,14)", () => {
-    const store = createStore({ ...CONFIG, smsBaseIntervalMinutes: 2 });
+  it("SMS gap minutes are always the natural F(k) (the pace is not configurable)", () => {
+    const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
-    for (let i = 0; i < 15; i += 1) scheduler.tick();
+    for (let i = 0; i < 25; i += 1) scheduler.tick();
     const sent = sentSms(store);
-    // gaps F(k)×2 = 2,2,4,6,10 → cumulative minutes 2,4,8,14.
-    const minutes = sent.map((s) => s.fibIndex);
-    expect(minutes).toEqual([1, 2, 3, 4]);
-    expect(sent.map((s) => s.fibMinute)).toEqual([2, 2, 4, 6]);
-    expect(sent).toHaveLength(4);
+    // Unchanged 1,1,2,3,5,8… cadence — there is no base multiplier.
+    expect(sent.map((s) => s.fibMinute)).toEqual([1, 1, 2, 3, 5, 8]);
   });
 });
 
@@ -137,47 +133,28 @@ describe("createScheduler — Fibonacci reset (ADR-0009, days × 1440)", () => {
 });
 
 describe("createScheduler — recomputeFromConfig determinism (ADR-0009)", () => {
-  it("re-anchors the next SMS when the base changes mid-run (increase pushes it out)", () => {
+  it("a config change never disturbs the (non-configurable) SMS Fibonacci pace", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
     store.setConfigChangeHandler(() => scheduler.recomputeFromConfig());
 
-    // Run to minute 2: sends at m1 (idx1) and m2 (idx2); pending gap idx3 (F=2),
-    // anchored at m2 → would naturally fire at m4 (2 + 2×1).
+    // Run to minute 2: sends at m1 (idx1) and m2 (idx2); pending gap idx3
+    // (F=2), anchored at m2 → fires at m4 (2 + 2).
     scheduler.tick(); // m1
     scheduler.tick(); // m2
     expect(sentSms(store)).toHaveLength(2);
 
-    // Triple the base. Pending gap idx3 re-derived: anchor(2) + F(3)×3 = 2+6 = 8.
-    store.setRuntimeConfig({ smsBaseIntervalMinutes: 3 });
+    // Change an UNRELATED config field mid-run. The SMS cadence is unaffected
+    // — gap idx3 still lands at m4 with the natural F(3)=2.
+    store.setRuntimeConfig({ emailSummaryIntervalMinutes: 9 });
 
-    for (let m = 3; m <= 7; m += 1) scheduler.tick(); // m3..m7 → no send
+    scheduler.tick(); // m3 → no SMS
     expect(sentSms(store)).toHaveLength(2);
-    scheduler.tick(); // m8 → send idx3 with gap F(3)×3 = 6
+    scheduler.tick(); // m4 → send idx3, gap F(3)=2
     const sent = sentSms(store);
     expect(sent).toHaveLength(3);
     expect(sent[2]!.fibIndex).toBe(3);
-    expect(sent[2]!.fibMinute).toBe(6);
-  });
-
-  it("a base DECREASE that moves the target into the past fires on the very next tick", () => {
-    const store = createStore({ ...CONFIG, smsBaseIntervalMinutes: 5 });
-    const scheduler = createScheduler(store);
-    store.setConfigChangeHandler(() => scheduler.recomputeFromConfig());
-
-    // base 5: first send at m5 (anchor 0 + F(1)×5).
-    for (let m = 1; m <= 4; m += 1) scheduler.tick(); // m1..m4 no send
-    expect(sentSms(store)).toHaveLength(0);
-
-    // Drop base to 1. Pending idx1 re-derived: anchor(0) + F(1)×1 = 1 ≤ 4 (now),
-    // so it is clamped to minuteCount+1 = m5 — the next tick fires it, never
-    // retroactively, never skipped.
-    store.setRuntimeConfig({ smsBaseIntervalMinutes: 1 });
-    scheduler.tick(); // m5 → send idx1
-    const sent = sentSms(store);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.fibIndex).toBe(1);
-    expect(sent[0]!.fibMinute).toBe(1);
+    expect(sent[2]!.fibMinute).toBe(2);
   });
 
   it("a shrunk reset window already past-due resets immediately on recompute", () => {
@@ -235,6 +212,130 @@ describe("createScheduler — resilience", () => {
   });
 });
 
+describe("createScheduler — startup notifications (ADR-0004 D3)", () => {
+  it("emitStartup emits EXACTLY one summary email + one SMS immediately", () => {
+    const store = createStore(CONFIG);
+    const scheduler = createScheduler(store);
+
+    scheduler.emitStartup();
+
+    expect(summaryEmails(store)).toHaveLength(1);
+    const sent = sentSms(store);
+    expect(sent).toHaveLength(1);
+    // The startup SMS is the FIRST Fibonacci send: idx 1, F(1)=1, cycle 0.
+    expect(sent[0]!.fibIndex).toBe(1);
+    expect(sent[0]!.fibMinute).toBe(1);
+    expect(sent[0]!.fibCycle).toBe(0);
+  });
+
+  it("the startup summary reflects current pending (empty ⇒ the no-pending path still fires)", () => {
+    const store = createStore(CONFIG);
+    const scheduler = createScheduler(store);
+
+    scheduler.emitStartup();
+    const summaries = summaryEmails(store);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.pending).toEqual([]);
+    expect(summaries[0]!.body).toContain("No pending tasks.");
+  });
+
+  it("the startup summary lists tasks that are pending at boot time", () => {
+    const store = createStore(CONFIG);
+    const scheduler = createScheduler(store);
+    const { task: alpha } = store.addTask("Alpha");
+
+    scheduler.emitStartup();
+    const summaries = summaryEmails(store);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.pending).toEqual([{ id: alpha.id, title: "Alpha" }]);
+  });
+
+  it("single-flight: a second emitStartup() is a strict no-op (no duplicates)", () => {
+    const store = createStore(CONFIG);
+    const scheduler = createScheduler(store);
+
+    scheduler.emitStartup();
+    scheduler.emitStartup(); // reconnect / hot-reload — must NOT re-emit
+    scheduler.emitStartup();
+
+    expect(summaryEmails(store)).toHaveLength(1);
+    expect(sentSms(store)).toHaveLength(1);
+  });
+
+  it("single-flight holds across start(): start() emits once; a second start() never re-emits", () => {
+    vi.useFakeTimers();
+    try {
+      const store = createStore(CONFIG);
+      const scheduler = createScheduler(store);
+
+      scheduler.start();
+      scheduler.start(); // reconnect — no double startup, no double interval
+
+      // Exactly one of each at start, BEFORE any tick has run.
+      expect(summaryEmails(store)).toHaveLength(1);
+      expect(sentSms(store)).toHaveLength(1);
+
+      scheduler.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the recurring sequence CONTINUES from the startup send (no duplicate idx-1 at minute 1)", () => {
+    const store = createStore(CONFIG);
+    const scheduler = createScheduler(store);
+
+    // Startup = the first Fibonacci send (minute 0, idx 1).
+    scheduler.emitStartup();
+    // Now drive 25 minutes of recurring ticks; with the startup send already
+    // consuming idx 1 (re-anchored at minute 0, next gap idx 2 = F(2)=1 → m1),
+    // the deterministic send schedule is (minute:idx): 0:1, 1:2, 3:3, 6:4,
+    // 11:5, 19:6. So after 25 ticks we expect 6 sends total (incl. startup).
+    for (let i = 0; i < 25; i += 1) scheduler.tick();
+
+    const sent = sentSms(store);
+    expect(sent).toHaveLength(6);
+    const expected = [
+      { fibIndex: 1, fibMinute: 1 }, // startup (minute 0)
+      { fibIndex: 2, fibMinute: 1 }, // minute 1
+      { fibIndex: 3, fibMinute: 2 }, // minute 3
+      { fibIndex: 4, fibMinute: 3 }, // minute 6
+      { fibIndex: 5, fibMinute: 5 }, // minute 11
+      { fibIndex: 6, fibMinute: 8 }, // minute 19
+    ];
+    sent.forEach((m, i) => {
+      expect(m.fibIndex).toBe(expected[i]!.fibIndex);
+      expect(m.fibMinute).toBe(expected[i]!.fibMinute);
+      expect(m.fibCycle).toBe(0);
+    });
+    // Crucially: NO duplicate idx-1 send at minute 1 — minute 1 is idx 2.
+    expect(sent.filter((m) => m.fibIndex === 1)).toHaveLength(1);
+  });
+
+  it("the recurring summary continues on its normal cadence after the startup one", () => {
+    // Interval 3: without startup, summaries land at minutes 3,6,9 (3 in 10
+    // ticks). The startup summary is ADDITIVE and does NOT shift the cadence
+    // (it's a pure function of minuteCount, untouched by emitStartup).
+    const store = createStore({ ...CONFIG, emailSummaryIntervalMinutes: 3 });
+    const scheduler = createScheduler(store);
+
+    scheduler.emitStartup(); // +1 summary (minute 0)
+    for (let i = 0; i < 10; i += 1) scheduler.tick(); // minutes 3,6,9 → +3
+
+    expect(summaryEmails(store)).toHaveLength(4); // 1 startup + 3 recurring
+  });
+
+  it("with interval 1 the startup summary precedes the every-minute recurring summaries", () => {
+    const store = createStore(CONFIG); // emailSummaryIntervalMinutes: 1
+    const scheduler = createScheduler(store);
+
+    scheduler.emitStartup(); // +1 (minute 0)
+    for (let i = 0; i < 10; i += 1) scheduler.tick(); // minutes 1..10 → +10
+
+    expect(summaryEmails(store)).toHaveLength(11);
+  });
+});
+
 describe("createScheduler — start()/stop() single-flight", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -253,14 +354,20 @@ describe("createScheduler — start()/stop() single-flight", () => {
     scheduler.start(); // no-op
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
 
+    // start() also emits the one-time startup pair (ADR-0004 D3), exactly
+    // once even though start() was called twice — single-flight.
+    expect(summaryEmails(store)).toHaveLength(1); // 1 startup, no ticks yet
+    expect(sentSms(store)).toHaveLength(1);
+
     // Advancing wall-time by N*tickMs produces exactly N ticks (one interval).
+    // Summaries fire every minute (interval 1) ⇒ 1 startup + 3 recurring.
     vi.advanceTimersByTime(CONFIG.tickMs * 3);
-    expect(summaryEmails(store)).toHaveLength(3);
+    expect(summaryEmails(store)).toHaveLength(4);
 
     scheduler.stop();
     expect(scheduler.started).toBe(false);
     vi.advanceTimersByTime(CONFIG.tickMs * 3);
-    expect(summaryEmails(store)).toHaveLength(3); // no more ticks after stop()
+    expect(summaryEmails(store)).toHaveLength(4); // no more ticks after stop()
 
     setIntervalSpy.mockRestore();
   });

@@ -6,7 +6,7 @@ import {
   afterEach,
   vi,
 } from "vitest";
-import { act } from "react";
+import { act, useCallback, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Email } from "@twofront/domain";
 import { EmailCard } from "./EmailCard";
@@ -296,5 +296,86 @@ describe("EmailCard — summary (RC2: per-pending-task complete)", () => {
       />,
     );
     expect(container.textContent).toContain("Summary");
+  });
+});
+
+/**
+ * Wave 12 — REGRESSION GUARD for the "Mark complete" per-second blink.
+ *
+ * Root cause (now fixed): `EmailCard` rendered an inline `TaskAction`
+ * component defined *inside its render*, so every `EmailCard` re-render
+ * created a new component identity → React UNMOUNTED + remounted the button.
+ * The Workbench's 1-second `now` clock re-rendered the un-memoized cards every
+ * second, so the hovered button blinked once a second.
+ *
+ * This harness mirrors how the Workbench passes props: a parent holds an
+ * unrelated `now` state (the 1 s clock) plus referentially-stable `EmailCard`
+ * props (a `useMemo` pending set + a `useCallback` `onError`, neither derived
+ * from `now`). It captures the live "Mark complete" DOM node, bumps ONLY the
+ * parent's `now`, and asserts the button is the *same DOM node* (not
+ * remounted) — strictly stronger than a render-count probe.
+ *
+ * On the OLD code this FAILS: an inline `TaskAction` plus an un-memoized
+ * `EmailCard` ⇒ the parent `now` bump re-renders `EmailCard` and re-creates
+ * `TaskAction`'s identity ⇒ React replaces the button with a NEW DOM node, so
+ * the `toBe` node-identity assertion (and the render-count probe) both fail.
+ * After the fix (`memo(EmailCard)` + module-level stable `TaskAction`) a
+ * `now`-only change does not re-render `EmailCard` at all → node is stable.
+ */
+let bumpNow: (() => void) | undefined;
+function NowHarness(): React.ReactElement {
+  // The Workbench's 1-second clock — UNRELATED to the email feed.
+  const [now, setNow] = useState<number>(1_700_000_000_000);
+  bumpNow = () => setNow((n) => n + 1000);
+  // Referentially stable across a `now` tick — exactly like Workbench, where
+  // `pendingIds` is `useMemo`(tasks) and `pushToast` is `useCallback`. With
+  // `EmailCard` `memo`'d and these props stable, a `now`-only change must NOT
+  // re-render `EmailCard` (so its DOM is untouched and the button stable).
+  const pendingTaskIds = useMemo(() => new Set([TASK_ID]), []);
+  const onError = useCallback(() => {}, []);
+  return (
+    <div>
+      <span data-testid="now">{now}</span>
+      <EmailCard
+        email={immediateEmail}
+        fresh={false}
+        pendingTaskIds={pendingTaskIds}
+        onError={onError}
+      />
+    </div>
+  );
+}
+
+describe("EmailCard — regression: a `now` tick must not remount the button", () => {
+  it("keeps the SAME 'Mark complete' (and article) DOM node across a parent `now` change", () => {
+    mount(<NowHarness />);
+
+    const labelSel = "Mark complete: New task added — Buy milk";
+    const btnBefore = buttonByLabel(labelSel);
+    const articleBefore = container.querySelector("article");
+    expect(articleBefore).not.toBeNull();
+
+    // Bump ONLY the unrelated `now` state (simulating the 1 s clock tick).
+    act(() => {
+      bumpNow!();
+    });
+
+    const btnAfter = buttonByLabel(labelSel);
+    const articleAfter = container.querySelector("article");
+
+    // The button must be the EXACT same DOM node — NOT unmounted/remounted.
+    // OLD CODE FAILS HERE: an inline `TaskAction` defined inside EmailCard's
+    // render + an un-memoized `EmailCard` ⇒ the `now` bump re-renders
+    // `EmailCard`, re-creates `TaskAction`'s component identity, and React
+    // replaces the button with a NEW DOM node ⇒ `btnAfter !== btnBefore`.
+    // AFTER THE FIX: `memo(EmailCard)` + module-level stable `TaskAction` ⇒
+    // a `now`-only change does not re-render `EmailCard` at all ⇒ same node.
+    expect(btnAfter).toBe(btnBefore);
+    // The whole card subtree is likewise stable (strengthens the guard).
+    expect(articleAfter).toBe(articleBefore);
+    // Sanity: the `now` state really did change (so the test is meaningful).
+    expect(
+      container.querySelector('[data-testid="now"]')?.textContent,
+    ).toBe("1700000001000");
   });
 });

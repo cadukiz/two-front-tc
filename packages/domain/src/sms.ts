@@ -15,8 +15,9 @@ export const SmsSchema = z.object({
   /** 1-based position in the current cycle's Fibonacci sequence. */
   fibIndex: z.number().int().positive(),
   /**
-   * The gap minutes used for this send = `F(fibIndex) × smsBaseIntervalMinutes`
-   * (ADR-0009). At the default base of 1 this equals `F(fibIndex)`.
+   * The gap minutes used for this send = `F(fibIndex)` minutes (ADR-0009).
+   * The SMS Fibonacci pace is not configurable — the gap is always the
+   * natural Fibonacci value (1,1,2,3,5,8…).
    */
   fibMinute: z.number().int().positive(),
   /** Epoch ms — display only. */

@@ -17,7 +17,6 @@ describe("@twofront/domain wiring", () => {
       ConfigSchema.safeParse({
         tickMs: 60,
         emailSummaryIntervalMinutes: 1,
-        smsBaseIntervalMinutes: 1,
         fibonacciResetDays: 1,
       }).success,
     ).toBe(true);
@@ -27,7 +26,6 @@ describe("@twofront/domain wiring", () => {
     expect(
       RuntimeConfigSchema.safeParse({
         emailSummaryIntervalMinutes: 1,
-        smsBaseIntervalMinutes: 1,
         fibonacciResetDays: 1,
       }).success,
     ).toBe(true);

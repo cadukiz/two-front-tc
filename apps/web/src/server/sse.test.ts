@@ -11,7 +11,6 @@ import { openSseStream, formatSseFrame } from "./sse";
 const CONFIG: Config = {
   tickMs: 60,
   emailSummaryIntervalMinutes: 1,
-  smsBaseIntervalMinutes: 1,
   fibonacciResetDays: 100,
 };
 
@@ -29,7 +28,6 @@ beforeEach(() => {
   // reads process.env. ADR-0009: every value defaults, so clearing the new
   // vars keeps these tests isolated from any ambient env.
   delete process.env.EMAIL_SUMMARY_INTERVAL_MINUTES;
-  delete process.env.SMS_BASE_INTERVAL_MINUTES;
   delete process.env.FIBONACCI_RESET_DAYS;
 });
 

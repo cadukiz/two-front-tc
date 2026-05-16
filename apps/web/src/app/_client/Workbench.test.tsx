@@ -54,7 +54,6 @@ const emptySnapshot: Snapshot = {
   lastSeq: 0,
   config: {
     emailSummaryIntervalMinutes: 1,
-    smsBaseIntervalMinutes: 1,
     fibonacciResetDays: 1,
   },
 };

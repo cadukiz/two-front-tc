@@ -39,7 +39,6 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   lastSeq: 0,
   config: {
     emailSummaryIntervalMinutes: 1,
-    smsBaseIntervalMinutes: 1,
     fibonacciResetDays: 1,
   },
   ...over,
@@ -227,7 +226,6 @@ describe("liveReducer — config.updated (ADR-0009)", () => {
     );
     expect(seeded.config).toEqual({
       emailSummaryIntervalMinutes: 1,
-      smsBaseIntervalMinutes: 1,
       fibonacciResetDays: 1,
     });
 
@@ -236,13 +234,11 @@ describe("liveReducer — config.updated (ADR-0009)", () => {
       seq: 3,
       data: {
         emailSummaryIntervalMinutes: 5,
-        smsBaseIntervalMinutes: 2,
         fibonacciResetDays: 9,
       },
     });
     expect(next.config).toEqual({
       emailSummaryIntervalMinutes: 5,
-      smsBaseIntervalMinutes: 2,
       fibonacciResetDays: 9,
     });
     // Feeds + dedupe key untouched (config is not an id/seq-keyed record).
@@ -260,11 +256,10 @@ describe("liveReducer — config.updated (ADR-0009)", () => {
       seq: 4,
       data: {
         emailSummaryIntervalMinutes: 7,
-        smsBaseIntervalMinutes: 7,
         fibonacciResetDays: 7,
       },
     });
-    expect(next.config?.smsBaseIntervalMinutes).toBe(7);
+    expect(next.config?.emailSummaryIntervalMinutes).toBe(7);
     expect(next.lastSeq).toBe(10);
   });
 });

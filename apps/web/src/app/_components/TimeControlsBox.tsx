@@ -6,10 +6,12 @@
  * only** — there is NO "simulated minute" / `tickMs` row (that lever is
  * internal/test-only and removed from the UI entirely).
  *
- * Three integer sliders bound to the live, server-authoritative `RuntimeConfig`:
+ * Two integer sliders bound to the live, server-authoritative `RuntimeConfig`:
  *  - Email summary every — 1–100 min
- *  - SMS · Fibonacci pace base — 1–100 min
  *  - SMS · reset Fibonacci pace after — 1–100 days
+ *
+ * The SMS Fibonacci pace itself is NOT configurable — gaps are always the
+ * natural `F(k)` minutes (the SMS-pace slider was removed).
  *
  * Each slider is optimistic locally and debounced (~300 ms) → `onPatch` (a
  * single-field `PATCH /api/config`). The server broadcasts `config.updated`
@@ -47,12 +49,6 @@ const SLIDERS: readonly SliderDef[] = [
   {
     field: "emailSummaryIntervalMinutes",
     label: "Email summary every",
-    unitOne: "min",
-    unitMany: "min",
-  },
-  {
-    field: "smsBaseIntervalMinutes",
-    label: "SMS · Fibonacci pace base",
     unitOne: "min",
     unitMany: "min",
   },

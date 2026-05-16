@@ -21,10 +21,83 @@
  *    flips to the done/disabled "Completed" state only once its task leaves
  *    the pending set, so the round-trip is visibly validated.
  */
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import type { Email } from "@twofront/domain";
 import { IBolt, IDigest, ICheck, IChevron } from "../components/icons";
 import { formatTime, formatDateTime } from "../lib/format";
+
+/**
+ * The app is **SSE-driven (no polling)** — feed content only changes when a
+ * server-authoritative SSE frame arrives. The Workbench keeps a 1-second
+ * `now` clock purely for the live task-age label (`TaskRow`); that tick must
+ * NOT churn the email feed. Two correctness-preserving guards make a `now`
+ * tick a no-op for emails:
+ *
+ *  1. `TaskAction` is a STABLE module-level component (below). It used to be
+ *     defined inside `EmailCard`'s render, so every `EmailCard` re-render
+ *     created a brand-new component identity → React UNMOUNTED + remounted the
+ *     button. Combined with the per-second clock re-rendering the un-memoized
+ *     cards, the hovered "Mark complete" button blinked once a second. A
+ *     module-level component has a stable identity → no remount.
+ *  2. `EmailCard` is wrapped in `React.memo` (bottom of file). With the
+ *     Workbench passing referentially-stable props (memoized `pendingTaskIds`
+ *     set + `useCallback` `onError`, derived from SSE state, not `now`), a
+ *     mere `now` tick no longer re-renders `EmailCard` at all.
+ */
+
+interface TaskActionProps {
+  /** The task this control completes. */
+  taskId: string;
+  /** Accessible label (the email subject or the per-entry task title). */
+  label: string;
+  /** Live, server-authoritative set of currently-pending task ids. */
+  pendingTaskIds: ReadonlySet<string>;
+  /** The id currently being marked (its control shows a disabled state). */
+  markingId: string | null;
+  /** Fire the GET email-link round-trip for `taskId`. */
+  onMark: (taskId: string) => void;
+}
+
+/**
+ * One complete affordance for a single task (shared by immediate + summary).
+ * Module-level + `memo` so its identity is stable across `EmailCard` renders —
+ * never re-mounted (the root cause of the per-second blink).
+ */
+const TaskAction = memo(function TaskAction({
+  taskId,
+  label,
+  pendingTaskIds,
+  markingId,
+  onMark,
+}: TaskActionProps): React.ReactElement {
+  const stillPending = pendingTaskIds.has(taskId);
+  if (!stillPending) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-label={`Completed: ${label}`}
+        className="inline-flex flex-none cursor-default items-center gap-[6px] rounded-pill border border-[rgba(15,93,74,0.2)] bg-teal-50 px-3 py-[5px] text-[12px] font-medium text-teal [&_svg]:h-3 [&_svg]:w-3"
+      >
+        <ICheck /> Completed
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={markingId === taskId}
+      aria-label={`Mark complete: ${label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onMark(taskId);
+      }}
+      className="inline-flex flex-none items-center gap-[6px] rounded-pill border border-teal bg-transparent px-3 py-[5px] text-[12px] font-medium text-teal transition-all duration-150 hover:bg-teal hover:text-panel disabled:cursor-not-allowed disabled:opacity-70 motion-reduce:transition-none [&_svg]:h-3 [&_svg]:w-3"
+    >
+      <ICheck /> Mark complete
+    </button>
+  );
+});
 
 interface EmailCardProps {
   email: Email;
@@ -40,7 +113,7 @@ interface EmailCardProps {
   onError: (message: string) => void;
 }
 
-export function EmailCard({
+function EmailCardImpl({
   email,
   fresh,
   pendingTaskIds,
@@ -50,60 +123,30 @@ export function EmailCard({
   const [markingId, setMarkingId] = useState<string | null>(null);
   const isImmediate = email.kind === "immediate";
 
-  const markComplete = async (taskId: string): Promise<void> => {
-    setMarkingId(taskId);
-    try {
-      // The exact email-action link path (GET adapter) — not the POST API.
-      const res = await fetch(`/api/tasks/${taskId}/complete`, {
-        method: "GET",
-      });
-      if (!res.ok) {
-        onError("Could not complete task from email — server rejected it.");
-      }
-      // Success reflects back via SSE → the id leaves `pendingTaskIds`.
-    } catch {
-      onError("Could not complete task from email — connection problem.");
-    } finally {
-      setMarkingId(null);
-    }
-  };
-
-  /** One complete affordance for a single task (shared immediate + summary). */
-  const TaskAction = ({
-    taskId,
-    label,
-  }: {
-    taskId: string;
-    label: string;
-  }): React.ReactElement => {
-    const stillPending = pendingTaskIds.has(taskId);
-    if (!stillPending) {
-      return (
-        <button
-          type="button"
-          disabled
-          aria-label={`Completed: ${label}`}
-          className="inline-flex flex-none cursor-default items-center gap-[6px] rounded-pill border border-[rgba(15,93,74,0.2)] bg-teal-50 px-3 py-[5px] text-[12px] font-medium text-teal [&_svg]:h-3 [&_svg]:w-3"
-        >
-          <ICheck /> Completed
-        </button>
-      );
-    }
-    return (
-      <button
-        type="button"
-        disabled={markingId === taskId}
-        aria-label={`Mark complete: ${label}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          void markComplete(taskId);
-        }}
-        className="inline-flex flex-none items-center gap-[6px] rounded-pill border border-teal bg-transparent px-3 py-[5px] text-[12px] font-medium text-teal transition-all duration-150 hover:bg-teal hover:text-panel disabled:cursor-not-allowed disabled:opacity-70 motion-reduce:transition-none [&_svg]:h-3 [&_svg]:w-3"
-      >
-        <ICheck /> Mark complete
-      </button>
-    );
-  };
+  // `useCallback` so the `onMark` prop handed to the (memoized) `TaskAction`
+  // is referentially stable across re-renders — keeps the memo intact.
+  const markComplete = useCallback(
+    (taskId: string): void => {
+      setMarkingId(taskId);
+      void (async () => {
+        try {
+          // The exact email-action link path (GET adapter) — not the POST API.
+          const res = await fetch(`/api/tasks/${taskId}/complete`, {
+            method: "GET",
+          });
+          if (!res.ok) {
+            onError("Could not complete task from email — server rejected it.");
+          }
+          // Success reflects back via SSE → the id leaves `pendingTaskIds`.
+        } catch {
+          onError("Could not complete task from email — connection problem.");
+        } finally {
+          setMarkingId(null);
+        }
+      })();
+    },
+    [onError],
+  );
 
   return (
     <article
@@ -155,7 +198,13 @@ export function EmailCard({
       <div className="border-t border-dashed border-line-soft px-[14px] py-[10px]">
         {isImmediate && email.taskId != null ? (
           <div className="flex items-center justify-end">
-            <TaskAction taskId={email.taskId} label={email.subject} />
+            <TaskAction
+              taskId={email.taskId}
+              label={email.subject}
+              pendingTaskIds={pendingTaskIds}
+              markingId={markingId}
+              onMark={markComplete}
+            />
           </div>
         ) : !isImmediate && email.pending != null ? (
           email.pending.length > 0 ? (
@@ -171,7 +220,13 @@ export function EmailCard({
                   <span className="min-w-0 truncate text-[13px] text-ink-2">
                     {p.title}
                   </span>
-                  <TaskAction taskId={p.id} label={p.title} />
+                  <TaskAction
+                    taskId={p.id}
+                    label={p.title}
+                    pendingTaskIds={pendingTaskIds}
+                    markingId={markingId}
+                    onMark={markComplete}
+                  />
                 </li>
               ))}
             </ul>
@@ -202,3 +257,14 @@ export function EmailCard({
     </article>
   );
 }
+
+/**
+ * Memoized: the feed is SSE-driven, so an `EmailCard` only needs to re-render
+ * when its own `email` / `fresh` / `pendingTaskIds` / `onError` props change.
+ * The Workbench's 1-second `now` clock (for the live task age) must NOT touch
+ * this card — with referentially-stable props (memoized set + `useCallback`
+ * handler, both derived from SSE state, not `now`) the default shallow `memo`
+ * comparison makes a `now` tick a strict no-op here. This (plus the hoisted,
+ * stable `TaskAction`) is what stops the "Mark complete" per-second blink.
+ */
+export const EmailCard = memo(EmailCardImpl);

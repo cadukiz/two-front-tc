@@ -12,12 +12,13 @@ import type { RuntimeConfig } from "@twofront/domain";
 import { TimeControlsBox } from "./TimeControlsBox";
 
 /**
- * Wave 10 — TimeControlsBox is now THREE interactive integer sliders
- * (ADR-0009): Email summary (1–100 min), SMS pace (1–100 min), Fibonacci
- * reset (1–100 days). It is seeded from the live `config`, debounces changes
- * to `onPatch`, optimistically reflects the local value, and reconciles to a
- * new server `config` prop. NOTHING about "simulated minute" / `tickMs` is
- * rendered (that lever is internal/test-only and removed from the UI).
+ * Wave 10 — TimeControlsBox is TWO interactive integer sliders (ADR-0009):
+ * Email summary (1–100 min) and Fibonacci reset (1–100 days). The SMS
+ * Fibonacci pace is NOT configurable (that slider was removed — gaps are
+ * always the natural F(k) minutes). It is seeded from the live `config`,
+ * debounces changes to `onPatch`, optimistically reflects the local value,
+ * and reconciles to a new server `config` prop. NOTHING about "simulated
+ * minute" / `tickMs` is rendered (that lever is internal/test-only).
  */
 beforeAll(() => {
   (
@@ -46,7 +47,6 @@ afterEach(() => {
 
 const config: RuntimeConfig = {
   emailSummaryIntervalMinutes: 4,
-  smsBaseIntervalMinutes: 9,
   fibonacciResetDays: 13,
 };
 
@@ -68,26 +68,31 @@ function setRange(el: HTMLInputElement, value: number): void {
 }
 
 describe("TimeControlsBox — interactive sliders (ADR-0009)", () => {
-  it("renders exactly three integer range sliders seeded from config", () => {
+  it("renders exactly two integer range sliders seeded from config", () => {
     mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
     const r = ranges();
-    expect(r).toHaveLength(3);
+    expect(r).toHaveLength(2);
     for (const el of r) {
       expect(el.min).toBe("1");
       expect(el.max).toBe("100");
       expect(el.step).toBe("1");
     }
-    const [email, sms, fib] = r;
+    const [email, fib] = r;
     expect(email!.value).toBe("4");
-    expect(sms!.value).toBe("9");
     expect(fib!.value).toBe("13");
+  });
+
+  it("does NOT render an SMS Fibonacci-pace slider (pace is not configurable)", () => {
+    mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
+    const text = (container.textContent ?? "").toLowerCase();
+    expect(text).not.toContain("fibonacci pace base");
+    expect(text).not.toContain("pace base");
   });
 
   it("labels show the current value + unit", () => {
     mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
     const text = container.textContent ?? "";
     expect(text).toContain("4 min");
-    expect(text).toContain("9 min");
     expect(text).toContain("13 days");
   });
 
@@ -117,16 +122,16 @@ describe("TimeControlsBox — interactive sliders (ADR-0009)", () => {
     mount(
       <TimeControlsBox config={config} onPatch={onPatch} onError={vi.fn()} />,
     );
-    const [, sms] = ranges();
-    setRange(sms!, 20);
-    setRange(sms!, 30);
-    setRange(sms!, 50);
+    const [, fib] = ranges();
+    setRange(fib!, 20);
+    setRange(fib!, 30);
+    setRange(fib!, 50);
     expect(onPatch).not.toHaveBeenCalled(); // still within debounce
     act(() => {
       vi.advanceTimersByTime(500);
     });
     expect(onPatch).toHaveBeenCalledTimes(1);
-    expect(onPatch).toHaveBeenCalledWith({ smsBaseIntervalMinutes: 50 });
+    expect(onPatch).toHaveBeenCalledWith({ fibonacciResetDays: 50 });
   });
 
   it("reconciles to a new server config prop (config.updated authority)", () => {
@@ -157,7 +162,7 @@ describe("TimeControlsBox — interactive sliders (ADR-0009)", () => {
     mount(
       <TimeControlsBox config={config} onPatch={onPatch} onError={onError} />,
     );
-    const [, , fib] = ranges();
+    const [, fib] = ranges();
     setRange(fib!, 60);
     await act(async () => {
       vi.advanceTimersByTime(500);

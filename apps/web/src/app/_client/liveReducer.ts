@@ -22,7 +22,7 @@ export interface LiveState {
   /** Highest `seq` applied so far — the reconnect dedupe key (ADR-0006 D5). */
   lastSeq: number;
   /**
-   * Server-authoritative runtime cadence config (ADR-0009 — the 3 user-facing
+   * Server-authoritative runtime cadence config (ADR-0009 — the 2 user-facing
    * ints; `tickMs` is internal/test-only and never reaches the client). Seeded
    * by every snapshot and updated by `config.updated` SSE frames so the
    * sliders stay in sync across all clients. `null` only before the first

@@ -9,18 +9,22 @@ import { z } from "zod";
  */
 export const DEFAULT_TICK_MS = 60_000;
 
-/** Defaults for the three user-facing, runtime-configurable cadence values (ADR-0009). */
+/** Defaults for the two user-facing, runtime-configurable cadence values (ADR-0009). */
 export const DEFAULT_EMAIL_SUMMARY_INTERVAL_MINUTES = 1;
-export const DEFAULT_SMS_BASE_INTERVAL_MINUTES = 1;
 export const DEFAULT_FIBONACCI_RESET_DAYS = 1;
 
 /** Each user-facing cadence value is an integer in [1, 100]. */
 const cadenceInt = z.number().int().min(1).max(100);
 
 /**
- * The three user-facing, runtime-mutable cadence settings (ADR-0009). This is
+ * The two user-facing, runtime-mutable cadence settings (ADR-0009). This is
  * what `Snapshot.config` carries and what the Time Controls sliders bind to.
  * `tickMs` is intentionally NOT here — it is internal/test-only.
+ *
+ * NOTE: the SMS Fibonacci pace is NOT configurable — gaps are always the
+ * natural `F(k)` minutes (the unchanged 1,1,2,3,5,8… cadence). The
+ * `smsBaseIntervalMinutes` lever was removed (it reversed the SMS half of
+ * ADR-0009's symmetric controls).
  */
 export const RuntimeConfigSchema = z.object({
   /**
@@ -29,11 +33,6 @@ export const RuntimeConfigSchema = z.object({
    * `emailResetMinutes`/`emailCycle` (the email reset-cycle concept is dropped).
    */
   emailSummaryIntervalMinutes: cadenceInt,
-  /**
-   * SMS Fibonacci gaps = `F(k) × smsBaseIntervalMinutes` minutes. Default 1 ⇒
-   * the unchanged 1,1,2,3,5,8… cadence.
-   */
-  smsBaseIntervalMinutes: cadenceInt,
   /**
    * Every N days the SMS Fibonacci sequence restarts (`fibCycle++`).
    * Internally 1 day = 1440 minutes.
@@ -54,7 +53,7 @@ export const PatchConfigRequestSchema = RuntimeConfigSchema.partial().refine(
 export type PatchConfigRequest = z.infer<typeof PatchConfigRequestSchema>;
 
 /**
- * Full server-resolved config: the three user-facing ints plus the internal
+ * Full server-resolved config: the two user-facing ints plus the internal
  * `tickMs`. The store holds this; only the `RuntimeConfig` subset is surfaced.
  */
 export const ConfigSchema = RuntimeConfigSchema.extend({
@@ -69,7 +68,7 @@ export type EnvLike = Readonly<Record<string, string | undefined>>;
  * Resolve runtime config from an env-like map (the server passes `process.env`;
  * the domain package stays runtime-agnostic and dependency-free apart from Zod).
  * **Every value has a default so the app runs with no env at all** (ADR-0009):
- * `tickMs` → {@link DEFAULT_TICK_MS}; the three cadence ints → 1.
+ * `tickMs` → {@link DEFAULT_TICK_MS}; the two cadence ints → 1.
  */
 export function resolveConfig(env: EnvLike): Config {
   const toNum = (raw: string | undefined, fallback: number): number => {
@@ -84,10 +83,6 @@ export function resolveConfig(env: EnvLike): Config {
       env["EMAIL_SUMMARY_INTERVAL_MINUTES"],
       DEFAULT_EMAIL_SUMMARY_INTERVAL_MINUTES,
     ),
-    smsBaseIntervalMinutes: toNum(
-      env["SMS_BASE_INTERVAL_MINUTES"],
-      DEFAULT_SMS_BASE_INTERVAL_MINUTES,
-    ),
     fibonacciResetDays: toNum(
       env["FIBONACCI_RESET_DAYS"],
       DEFAULT_FIBONACCI_RESET_DAYS,
@@ -99,7 +94,6 @@ export function resolveConfig(env: EnvLike): Config {
 export function toRuntimeConfig(cfg: Config): RuntimeConfig {
   return {
     emailSummaryIntervalMinutes: cfg.emailSummaryIntervalMinutes,
-    smsBaseIntervalMinutes: cfg.smsBaseIntervalMinutes,
     fibonacciResetDays: cfg.fibonacciResetDays,
   };
 }

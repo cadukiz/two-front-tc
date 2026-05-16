@@ -12,14 +12,15 @@ describe("SseEvent — config.updated (ADR-0009)", () => {
       seq: 12,
       data: {
         emailSummaryIntervalMinutes: 3,
-        smsBaseIntervalMinutes: 2,
         fibonacciResetDays: 5,
       },
     };
     const parsed = SseEventSchema.parse(evt);
     expect(parsed.type).toBe("config.updated");
     if (parsed.type === "config.updated") {
-      expect(parsed.data.smsBaseIntervalMinutes).toBe(2);
+      expect(parsed.data.emailSummaryIntervalMinutes).toBe(3);
+      expect(parsed.data.fibonacciResetDays).toBe(5);
+      expect("smsBaseIntervalMinutes" in parsed.data).toBe(false);
     }
   });
 
@@ -30,7 +31,6 @@ describe("SseEvent — config.updated (ADR-0009)", () => {
         seq: 1,
         data: {
           emailSummaryIntervalMinutes: 0,
-          smsBaseIntervalMinutes: 1,
           fibonacciResetDays: 1,
         },
       }).success,

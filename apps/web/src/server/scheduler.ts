@@ -6,9 +6,12 @@
  * `createStore(injectedConfig)` — no real timers in unit tests.
  *
  * Runtime config (ADR-0009) is **mutable and read fresh every tick** from
- * `store.getRuntimeConfig()`. `recomputeFromConfig()` is invoked by the store
- * the instant the config changes so the next summary / SMS / reset is
- * re-derived deterministically mid-run (see the rule on each step below).
+ * `store.getRuntimeConfig()`. It carries exactly two user-facing ints: the
+ * summary-email interval and the Fibonacci-reset window (days). The SMS
+ * Fibonacci pace is **not configurable** — gaps are always the natural `F(k)`
+ * minutes. `recomputeFromConfig()` is invoked by the store the instant the
+ * config changes so a shrunk reset window is applied deterministically mid-run
+ * (see the rule on each step below); the summary interval needs no recompute.
  *
  * Types come from `@twofront/domain`; the store is the only mutable state.
  */
@@ -19,13 +22,23 @@ export interface Scheduler {
   /** Advance exactly one minute and perform that minute's work. */
   tick(): void;
   /**
-   * Re-derive the next SMS/summary/reset against the **current** runtime
+   * Re-evaluate the Fibonacci-reset window against the **current** runtime
    * config (ADR-0009). Called by the store inside `setRuntimeConfig` BEFORE the
-   * `config.updated` broadcast. Deterministic — see the per-concern rules in
-   * the body. Idempotent: calling it without a config change is a no-op.
+   * `config.updated` broadcast. Deterministic — see the rule in the body.
+   * Idempotent: calling it without a config change is a no-op.
    */
   recomputeFromConfig(): void;
-  /** Wire the recurring `setInterval(tick, store.tickMs)` once (single-flight). */
+  /**
+   * Emit the one-time startup pair (one summary email + one SMS) immediately,
+   * single-flight per scheduler lifetime (ADR-0004 D3). Idempotent — a second
+   * call (reconnect / hot-reload) is a no-op. `start()` calls this; exposed for
+   * deterministic unit assertions without wiring a real interval.
+   */
+  emitStartup(): void;
+  /**
+   * Wire the recurring `setInterval(tick, store.tickMs)` once (single-flight)
+   * AND emit the one-time startup pair (`emitStartup()`) on the first start.
+   */
   start(): void;
   /** Clear the interval (if any). */
   stop(): void;
@@ -41,17 +54,22 @@ export function createScheduler(store: Store): Scheduler {
   let fibMinutesElapsed = 0;
   let fibIndex = 1;
   // The minute the previous SMS fired (0 = none yet, i.e. the cycle anchor).
-  // The anchor for the *current* pending gap — `recomputeFromConfig` re-derives
-  // `nextSmsAtMinute` relative to this so a mid-run base change is deterministic.
+  // The anchor for the *current* pending gap — re-anchored to the firing
+  // minute on each send and to `minuteCount` on a Fibonacci reset.
   let smsAnchorMinute = 0;
   let nextSmsAtMinute = computeNextSms(smsAnchorMinute, fibIndex);
 
   let intervalId: ReturnType<typeof setInterval> | undefined;
+  // Single-flight startup-emit guard (ADR-0004 D3). The startup summary + SMS
+  // fire exactly ONCE per scheduler lifetime — this flag, together with the
+  // `globalThis` singleton in `ensureSchedulerStarted`, guarantees that a
+  // reconnect (a second SSE connect) or a Next dev hot-reload (which re-evals
+  // the module but reuses the global scheduler) can never double-emit them.
+  let startupEmitted = false;
 
-  /** Gap-end minute for the pending send: anchor + F(fibIndex) × base. */
+  /** Gap-end minute for the pending send: anchor + F(fibIndex) minutes. */
   function computeNextSms(anchorMinute: number, idx: number): number {
-    const base = store.getRuntimeConfig().smsBaseIntervalMinutes;
-    return anchorMinute + fibonacciMinutes(idx) * base;
+    return anchorMinute + fibonacciMinutes(idx);
   }
 
   /** Current Fibonacci-reset window length in minutes (≥1; ADR-0009: days×1440). */
@@ -78,8 +96,8 @@ export function createScheduler(store: Store): Scheduler {
    *     (`fibonacciResetDays × 1440`), bump fibCycle, restart the sequence and
    *     re-anchor the next send — NO SMS is sent on the reset minute itself.
    *  4. SMS (Fibonacci gaps, ADR-0004/0009): if this minute is the scheduled
-   *     send minute, append the SMS (gap minutes = F(fibIndex) × base), then
-   *     advance the index and re-anchor the next gap to *this* minute.
+   *     send minute, append the SMS (gap minutes = F(fibIndex)), then advance
+   *     the index and re-anchor the next gap to *this* minute.
    *  5. Summary email (ADR-0009): fires when
    *     `minuteCount % emailSummaryIntervalMinutes === 0` (default 1 ⇒ every
    *     minute), always — even with 0 pending tasks. This is a pure function
@@ -99,7 +117,7 @@ export function createScheduler(store: Store): Scheduler {
       if (minuteCount === nextSmsAtMinute) {
         store.appendSms({
           fibIndex,
-          fibMinute: computeSmsGap(fibIndex),
+          fibMinute: fibonacciMinutes(fibIndex),
         });
         smsAnchorMinute = minuteCount;
         fibIndex += 1;
@@ -120,46 +138,83 @@ export function createScheduler(store: Store): Scheduler {
     }
   }
 
-  /** Gap minutes recorded on the SMS = F(fibIndex) × base (ADR-0009). */
-  function computeSmsGap(idx: number): number {
-    return (
-      fibonacciMinutes(idx) * store.getRuntimeConfig().smsBaseIntervalMinutes
-    );
-  }
-
   /**
-   * Mid-run config change recompute (ADR-0009). Deterministic rule:
+   * Mid-run config change recompute (ADR-0009). The runtime config carries two
+   * user-facing ints; only one has any mid-run effect to re-derive:
    *
-   *  - **SMS base**: the pending gap's index (`fibIndex`) and its anchor
-   *    (`smsAnchorMinute` = the minute the previous SMS fired, or 0) are
-   *    preserved; the next send minute is re-derived as
-   *    `anchor + F(fibIndex) × newBase`. If that is already ≤ the current
-   *    `minuteCount` (a base *decrease* moved the target into the past), it is
-   *    clamped to `minuteCount + 1` so the very next tick fires it — never
-   *    retroactively, never skipped.
    *  - **Summary interval**: nothing to recompute — step 5 evaluates
    *    `minuteCount % interval` against the live config each tick.
    *  - **Fibonacci reset days**: re-evaluate the window immediately. If
    *    `fibMinutesElapsed` has already reached the *new* (smaller) window, the
    *    reset fires now (cycle++, sequence restart, re-anchor) exactly as a tick
    *    would; otherwise the longer window simply defers it.
+   *
+   * (The SMS Fibonacci pace is not configurable, so the pending gap never has
+   * to be re-anchored for a config change.)
    */
   function recomputeFromConfig(): void {
-    // Re-anchor the pending SMS to the new base (index/anchor unchanged).
-    const rederived = computeNextSms(smsAnchorMinute, fibIndex);
-    nextSmsAtMinute =
-      rederived <= minuteCount ? minuteCount + 1 : rederived;
-
     // A shrunk reset window may already be due — apply it deterministically.
     if (fibMinutesElapsed >= fibResetWindowMinutes()) {
       resetFibonacci();
     }
   }
 
+  /**
+   * One-time startup emit (ADR-0004 D3 — instant content on first SSE connect
+   * instead of waiting up to a full minute for the first tick).
+   *
+   * STARTUP SCHEDULE RULE (coherent + deterministic — do not change lightly):
+   *  - The startup SMS *is* the FIRST Fibonacci send: `fibIndex 1`,
+   *    `fibMinute = fibonacciMinutes(1) = 1`, `fibCycle 0`, conceptually at
+   *    "minute 0" (`minuteCount` is still 0 here — `start()` calls this before
+   *    the first `tick()`).
+   *  - We then advance the SMS state EXACTLY as the tick's send-block does
+   *    after a send: re-anchor `smsAnchorMinute` to the current minute (0),
+   *    bump `fibIndex` to 2, and recompute `nextSmsAtMinute = 0 + F(2) = 1`.
+   *    So the recurring sequence *continues* from the startup send — the next
+   *    SMS is the SECOND Fibonacci gap (idx 2) at minute 1, NOT a duplicate
+   *    idx-1 send at the old minute-1 mark. Full send schedule (minute:idx):
+   *    0:1, 1:2, 3:3, 6:4, 11:5, 19:6, … (vs. the no-startup 1:1, 2:2, 4:3, …).
+   *  - The startup summary email reflects the CURRENT pending tasks (empty `[]`
+   *    at boot ⇒ the existing "No pending tasks at this time." path still fires
+   *    — ADR-0004). The recurring summary then continues on its normal
+   *    `emailSummaryIntervalMinutes` cadence, evaluated per tick against
+   *    `minuteCount` (unaffected — `minuteCount` is untouched here).
+   *
+   * Single-flight via `startupEmitted`: a reconnect or hot-reload that calls
+   * `start()`/`emitStartup()` again is a strict no-op (exactly one of each).
+   */
+  function emitStartup(): void {
+    if (startupEmitted) return; // single-flight — no double-emit ever
+    startupEmitted = true;
+    try {
+      // Startup summary (current pending; empty ⇒ the no-pending path fires).
+      store.appendSummaryEmail();
+      // Startup SMS = the first Fibonacci send (idx 1, F(1)=1, cycle 0).
+      store.appendSms({
+        fibIndex,
+        fibMinute: fibonacciMinutes(fibIndex),
+      });
+      // Advance exactly as a tick send would: re-anchor to the current minute
+      // (0), bump the index, recompute the next gap → idx 2 at minute 1. This
+      // is what makes the recurring sequence a coherent continuation (no dupe).
+      smsAnchorMinute = minuteCount;
+      fibIndex += 1;
+      nextSmsAtMinute = computeNextSms(smsAnchorMinute, fibIndex);
+    } catch (err) {
+      // Never let the startup emit throw out of start()/the SSE connect path.
+      console.error("[scheduler] startup emit failed:", err);
+    }
+  }
+
   return {
     tick,
     recomputeFromConfig,
+    emitStartup,
     start(): void {
+      // Startup pair fires once, before the first recurring tick, so the user
+      // gets instant content. Single-flight inside `emitStartup`.
+      emitStartup();
       if (intervalId !== undefined) return; // single-flight
       intervalId = setInterval(tick, store.tickMs);
     },

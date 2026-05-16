@@ -57,7 +57,16 @@ let toastSeq = 0;
 export function Workbench({ initial }: WorkbenchProps) {
   const { tasks, emails, sms, config, connection } = useLiveState(initial);
 
-  // Live ticking clock (client-only; avoids SSR hydration drift).
+  // Live ticking clock (client-only; avoids SSR hydration drift). This 1-second
+  // `setInterval` is the ONLY client cadence and exists solely to advance the
+  // live task-age label in `TaskRow` — the app is otherwise SSE-driven (NO
+  // polling; the server stays authoritative). A `now` tick re-renders this
+  // container, but the memoized feed cards (`EmailCard`, `SmsBubble`) must NOT
+  // re-render from it: every prop they receive is referentially stable across
+  // a tick (the email/sms objects, the memoized `pendingIds` set, the
+  // `useCallback` `pushToast`/`onError` — all derived from SSE state, never
+  // from `now`). `TaskRow` legitimately re-renders each second (it needs
+  // `now`); that is the live-age element, not the blinking one.
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);

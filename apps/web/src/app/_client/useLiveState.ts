@@ -36,7 +36,7 @@ export interface LiveStateResult {
   emails: LiveState["emails"];
   sms: LiveState["sms"];
   /**
-   * Authoritative runtime cadence config (ADR-0009 — the 3 user-facing ints).
+   * Authoritative runtime cadence config (ADR-0009 — the 2 user-facing ints).
    * Seeded from the SSR snapshot so it is non-null from the first paint, then
    * kept in sync by `config.updated` SSE frames.
    */

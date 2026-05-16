@@ -22,7 +22,6 @@ beforeEach(() => {
   process.env.TICK_MS = "60";
   // ADR-0009: cadence vars all default to 1 when unset — keep a known baseline.
   delete process.env.EMAIL_SUMMARY_INTERVAL_MINUTES;
-  delete process.env.SMS_BASE_INTERVAL_MINUTES;
   delete process.env.FIBONACCI_RESET_DAYS;
   resetSingletons();
 });
@@ -46,9 +45,9 @@ describe("GET /api/config", () => {
     const body = RuntimeConfigSchema.parse(await res.json());
     expect(body).toEqual({
       emailSummaryIntervalMinutes: 1,
-      smsBaseIntervalMinutes: 1,
       fibonacciResetDays: 1,
     });
+    expect("smsBaseIntervalMinutes" in body).toBe(false);
   });
 });
 
@@ -60,7 +59,6 @@ describe("PATCH /api/config — valid patches", () => {
     expect(res.status).toBe(200);
     const body = RuntimeConfigSchema.parse(await res.json());
     expect(body.emailSummaryIntervalMinutes).toBe(7);
-    expect(body.smsBaseIntervalMinutes).toBe(1);
     expect(body.fibonacciResetDays).toBe(1);
     // Store actually mutated.
     expect(getStore().getRuntimeConfig().emailSummaryIntervalMinutes).toBe(7);
@@ -69,7 +67,6 @@ describe("PATCH /api/config — valid patches", () => {
   it("applies each field independently", async () => {
     for (const [key, val] of [
       ["emailSummaryIntervalMinutes", 4],
-      ["smsBaseIntervalMinutes", 9],
       ["fibonacciResetDays", 50],
     ] as const) {
       resetSingletons();
@@ -83,14 +80,16 @@ describe("PATCH /api/config — valid patches", () => {
   it("applies a multi-field partial", async () => {
     const res = await PATCH(
       patchReq(
-        JSON.stringify({ smsBaseIntervalMinutes: 3, fibonacciResetDays: 8 }),
+        JSON.stringify({
+          emailSummaryIntervalMinutes: 3,
+          fibonacciResetDays: 8,
+        }),
       ),
     );
     expect(res.status).toBe(200);
     const body = RuntimeConfigSchema.parse(await res.json());
-    expect(body.smsBaseIntervalMinutes).toBe(3);
+    expect(body.emailSummaryIntervalMinutes).toBe(3);
     expect(body.fibonacciResetDays).toBe(8);
-    expect(body.emailSummaryIntervalMinutes).toBe(1);
   });
 
   it("broadcasts a config.updated SSE frame with the new config", async () => {
@@ -113,7 +112,11 @@ describe("PATCH /api/config — rejection (400 bad_request)", () => {
   });
 
   it("rejects an out-of-range value (reject)", async () => {
-    for (const bad of [{ fibonacciResetDays: 0 }, { smsBaseIntervalMinutes: 101 }, { emailSummaryIntervalMinutes: 2.5 }]) {
+    for (const bad of [
+      { fibonacciResetDays: 0 },
+      { fibonacciResetDays: 101 },
+      { emailSummaryIntervalMinutes: 2.5 },
+    ]) {
       const res = await PATCH(patchReq(JSON.stringify(bad)));
       expect(res.status).toBe(400);
       expect(ApiErrorSchema.parse(await res.json()).code).toBe("bad_request");
@@ -121,7 +124,6 @@ describe("PATCH /api/config — rejection (400 bad_request)", () => {
     // State unchanged after rejected patches.
     expect(getStore().getRuntimeConfig()).toEqual({
       emailSummaryIntervalMinutes: 1,
-      smsBaseIntervalMinutes: 1,
       fibonacciResetDays: 1,
     });
   });
@@ -130,6 +132,21 @@ describe("PATCH /api/config — rejection (400 bad_request)", () => {
     const res = await PATCH(patchReq(JSON.stringify({ tickMs: 5 })));
     expect(res.status).toBe(400);
     expect(ApiErrorSchema.parse(await res.json()).code).toBe("bad_request");
+  });
+
+  it("rejects a body whose only key is the removed smsBaseIntervalMinutes", async () => {
+    // SMS pace is no longer configurable: the unknown key is stripped, the
+    // body becomes empty, and the route answers 400 bad_request.
+    const res = await PATCH(
+      patchReq(JSON.stringify({ smsBaseIntervalMinutes: 5 })),
+    );
+    expect(res.status).toBe(400);
+    expect(ApiErrorSchema.parse(await res.json()).code).toBe("bad_request");
+    // Store untouched.
+    expect(getStore().getRuntimeConfig()).toEqual({
+      emailSummaryIntervalMinutes: 1,
+      fibonacciResetDays: 1,
+    });
   });
 
   it("rejects malformed JSON with 400 bad_request", async () => {

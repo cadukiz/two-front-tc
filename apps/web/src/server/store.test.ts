@@ -14,13 +14,11 @@ import { NotFoundError, ValidationError } from "./errors";
 const CONFIG: Config = {
   tickMs: 60,
   emailSummaryIntervalMinutes: 1,
-  smsBaseIntervalMinutes: 1,
   fibonacciResetDays: 7,
 };
 
 const RUNTIME: RuntimeConfig = {
   emailSummaryIntervalMinutes: 1,
-  smsBaseIntervalMinutes: 1,
   fibonacciResetDays: 7,
 };
 
@@ -185,10 +183,21 @@ describe("createStore — runtime config (ADR-0009)", () => {
 
   it("setRuntimeConfig clamps via schema, updates state, and returns the full new config", () => {
     const store = createStore(CONFIG);
-    const next = store.setRuntimeConfig({ smsBaseIntervalMinutes: 5 });
-    expect(next).toEqual({ ...RUNTIME, smsBaseIntervalMinutes: 5 });
-    expect(store.getRuntimeConfig().smsBaseIntervalMinutes).toBe(5);
-    expect(store.snapshot().config.smsBaseIntervalMinutes).toBe(5);
+    const next = store.setRuntimeConfig({ emailSummaryIntervalMinutes: 5 });
+    expect(next).toEqual({ ...RUNTIME, emailSummaryIntervalMinutes: 5 });
+    expect(store.getRuntimeConfig().emailSummaryIntervalMinutes).toBe(5);
+    expect(store.snapshot().config.emailSummaryIntervalMinutes).toBe(5);
+  });
+
+  it("setRuntimeConfig strips the removed smsBaseIntervalMinutes key", () => {
+    const store = createStore(CONFIG);
+    const next = store.setRuntimeConfig({
+      fibonacciResetDays: 3,
+      // @ts-expect-error — smsBaseIntervalMinutes is no longer a config key.
+      smsBaseIntervalMinutes: 9,
+    });
+    expect(next).toEqual({ ...RUNTIME, fibonacciResetDays: 3 });
+    expect("smsBaseIntervalMinutes" in next).toBe(false);
   });
 
   it("setRuntimeConfig rejects out-of-range values (throws ZodError)", () => {
@@ -310,7 +319,6 @@ describe("getStore — singleton", () => {
     // getStore() resolves config from process.env; with ADR-0009 every value
     // defaults, so resolveConfig works even with no env set.
     delete process.env.EMAIL_SUMMARY_INTERVAL_MINUTES;
-    delete process.env.SMS_BASE_INTERVAL_MINUTES;
     delete process.env.FIBONACCI_RESET_DAYS;
   });
 

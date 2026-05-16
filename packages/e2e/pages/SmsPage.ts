@@ -5,7 +5,7 @@ import { AppPage } from "./AppPage";
  * SMS panel page object.
  *
  * DOM facts (from `SmsBubble`): each message is a bubble whose meta line
- * carries the Fibonacci caption `Fibonacci #<i> · every <m>m`. That caption is
+ * carries the Fibonacci caption `Fibonacci #<i> - Next message in <m>m`. That caption is
  * unique-per-bubble and is the cleanest stable hook for counting/ordering
  * (newest-first = seq-desc, guaranteed by `liveReducer`).
  */
@@ -13,8 +13,8 @@ export class SmsPage {
   readonly page: Page;
   readonly app: AppPage;
 
-  /** The Fibonacci caption a `SmsBubble` always renders (· = U+00B7). */
-  static readonly CAPTION = /Fibonacci #\d+ · every \d+m/;
+  /** The Fibonacci caption a `SmsBubble` always renders. */
+  static readonly CAPTION = /Fibonacci #\d+ - Next message in \d+m/;
 
   constructor(app: AppPage) {
     this.app = app;
