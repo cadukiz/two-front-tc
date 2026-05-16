@@ -48,8 +48,6 @@ import { Toasts } from "../_components/Toasts";
 import type { Toast } from "../_components/Toasts";
 import { Splitter } from "../_components/Splitter";
 
-const EMPTY_FRESH: ReadonlySet<string> = new Set<string>();
-
 interface WorkbenchProps {
   initial: Snapshot;
 }
@@ -80,12 +78,13 @@ export function Workbench({ initial }: WorkbenchProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Pomodoro focus mode (ADR-0008): purely local render-mute. It pauses
-  // NOTHING server-side — `useLiveState` / the reducer / EventSource keep
-  // running and the feeds keep updating while `pomodoro.active`. We only
-  // suppress the visual notification noise (arrival highlights + toasts).
+  // Pomodoro (ADR-0014): a FULLY DECOUPLED, standalone local guidance
+  // countdown. It is consumed by NOTHING here — no derived suppression flag,
+  // no `EMPTY_FRESH` swap, no emptied `Toasts`, no banner. Starting/stopping a
+  // session is a complete no-op for feeds, arrival highlights and toasts; the
+  // widget owns only its own UI. (Supersedes the Pomodoro coupling clauses
+  // of ADR-0008 / ADR-0012.)
   const pomodoro = usePomodoro();
-  const muted = pomodoro.active;
 
   // Transient error toasts (AddTaskBar / complete failures).
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -218,18 +217,15 @@ export function Workbench({ initial }: WorkbenchProps) {
   );
 
   // Arrival highlights (client-only CSS class; server authoritative).
+  // ADR-0014: these are ALWAYS the real fresh sets — Pomodoro no longer
+  // swaps in an empty set. The highlight tracks arrivals truthfully
+  // regardless of any Pomodoro session.
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
   const emailIds = useMemo(() => emails.map((e) => e.id), [emails]);
   const smsIds = useMemo(() => sms.map((m) => m.id), [sms]);
-  // These keep tracking arrivals truthfully (server-authoritative); focus mode
-  // only *suppresses the highlight at render time* by presenting empty sets —
-  // the feeds themselves are already updated underneath.
-  const freshTasksReal = useFreshIds(taskIds);
-  const freshEmailsReal = useFreshIds(emailIds);
-  const freshSmsReal = useFreshIds(smsIds);
-  const freshTasks = muted ? EMPTY_FRESH : freshTasksReal;
-  const freshEmails = muted ? EMPTY_FRESH : freshEmailsReal;
-  const freshSms = muted ? EMPTY_FRESH : freshSmsReal;
+  const freshTasks = useFreshIds(taskIds);
+  const freshEmails = useFreshIds(emailIds);
+  const freshSms = useFreshIds(smsIds);
 
   // Email type filter (client-only, retained from the design — harmless).
   const [emailFilter, setEmailFilter] = useState<
@@ -487,12 +483,12 @@ export function Workbench({ initial }: WorkbenchProps) {
                 icon={<ITomato size={24} />}
                 meta={
                   <>
-                    focus
+                    timer
                     <span
                       aria-hidden="true"
                       className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
                     />
-                    mute locally
+                    local guide
                   </>
                 }
               >
@@ -601,9 +597,9 @@ export function Workbench({ initial }: WorkbenchProps) {
         </div>
       )}
 
-      {/* Focus mode suppresses toast popups (the queue is untouched — nothing
-          is lost; the server is unaffected). They resume when focus ends. */}
-      <Toasts items={muted ? [] : toasts} onDismiss={dismissToast} />
+      {/* ADR-0014: Toasts always receive the real queue — Pomodoro no longer
+          empties or suppresses them. */}
+      <Toasts items={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

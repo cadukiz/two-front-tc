@@ -16,10 +16,11 @@ import {
 } from "./usePomodoro";
 
 /**
- * Wave 9.2 — Pomodoro is a LOCAL render-mute timer (ADR-0008). These cover the
- * pure countdown math and the hook's start/stop/elapse lifecycle. The honest
- * "does not stop live state" assertion lives in Workbench.test.tsx (the hook
- * itself owns no data — it cannot touch the reducer by construction).
+ * Pomodoro is a purely LOCAL guidance countdown (ADR-0014, superseding the
+ * Pomodoro clauses of ADR-0008/ADR-0012). These cover the pure countdown math
+ * and the hook's start/stop/elapse lifecycle. The hook owns no data and is
+ * consumed by nothing outside the widget — starting a session is a complete
+ * no-op for the rest of the app (asserted in Workbench.pomodoro.test.tsx).
  */
 
 describe("remainingMsAt (pure countdown helper)", () => {

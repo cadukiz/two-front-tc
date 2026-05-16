@@ -5,12 +5,19 @@ import type { Snapshot, Sms } from "@twofront/domain";
 import { Workbench } from "./Workbench";
 
 /**
- * Wave 9.2 — HONEST semantics check (ADR-0008): starting a Pomodoro mutes the
- * *visual notification noise* only. The server keeps emitting and the SSE
- * reducer keeps applying — the feeds must STILL update while "focused". We
- * drive a controllable fake EventSource, start a focus session, push an
- * `sms.created` delta, and assert the SMS feed updated *and* the focus banner
- * is shown (proving render-mute is active, not a data pause).
+ * Wave 14 — ADR-0014: Pomodoro is FULLY DECOUPLED. It is a standalone local
+ * guidance countdown with ZERO outward effect — no render-mute, no
+ * `EMPTY_FRESH` swap, no emptied `Toasts`, no "Focus mode" banner. The
+ * ADR-0012 render-mute regression suite ("SSE delta still applies while
+ * focused", "highlight suppressed while focused", "resumes after Stop") is now
+ * obsolete *by design* and was removed: there is no coupling left to guard.
+ *
+ * The NEW invariant asserted here: starting a Pomodoro session changes
+ * NOTHING for the rest of the app — an SSE delta that arrives while a session
+ * is running behaves byte-identically to one that arrives when idle (the feed
+ * updates AND the arrival highlight still plays). We drive a controllable fake
+ * EventSource, start a session, push an `sms.created` delta, and prove the
+ * feed + the `animate-fresh-bubble` highlight are unaffected.
  */
 type Listener = (ev: MessageEvent) => void;
 
@@ -97,17 +104,36 @@ function clickButtonByText(text: string): void {
   });
 }
 
-describe("Workbench — Pomodoro focus mode is local render-mute only", () => {
-  it("keeps applying SSE deltas while focused (server unaffected)", () => {
+describe("Workbench — Pomodoro is fully decoupled (ADR-0014: a no-op)", () => {
+  it("renders no 'Focus mode'/mute/notifications wording at all", () => {
+    mount(<Workbench initial={snapshot} />);
+    // The widget exists…
+    expect(container.textContent).toContain("Pomodoro");
+    // …but ZERO mute/focus-mode/notifications coupling copy anywhere.
+    expect(container.textContent ?? "").not.toMatch(/Focus mode/i);
+    expect(container.textContent ?? "").not.toMatch(/notifications muted/i);
+    expect(container.textContent ?? "").not.toMatch(/\bmute/i);
+  });
+
+  it("does NOT show any banner or change toasts when a session starts", () => {
+    mount(<Workbench initial={snapshot} />);
+    clickButtonByText("Start");
+    // No focus banner appears (the old render-mute banner is gone).
+    expect(container.textContent ?? "").not.toMatch(/Focus mode/i);
+    // The toast host is still mounted and unfiltered (no emptied path).
+    clickButtonByText("Stop");
+    expect(container.textContent ?? "").not.toMatch(/Focus mode/i);
+  });
+
+  it("an SSE delta WHILE a session runs behaves exactly as when idle (feed + highlight unaffected)", () => {
     mount(<Workbench initial={snapshot} />);
     const es = ControllableEventSource.current;
     if (!es) throw new Error("EventSource not constructed");
 
-    // Activate focus mode.
+    // Start a Pomodoro session.
     clickButtonByText("Start");
-    expect(container.textContent).toContain("Focus mode active");
 
-    // Server keeps emitting — push an SMS delta WHILE focused.
+    // Server keeps emitting — push an SMS delta WHILE the session runs.
     act(() => {
       es.emit("sms.created", {
         type: "sms.created",
@@ -115,61 +141,34 @@ describe("Workbench — Pomodoro focus mode is local render-mute only", () => {
         data: sms({
           id: "10000000-0000-0000-0000-000000000001",
           seq: 1,
-          body: "ARRIVED-DURING-FOCUS",
+          body: "ARRIVED-DURING-POMODORO",
         }),
       });
     });
 
-    // The reducer still applied it — the feed updated underneath the mute.
-    expect(container.textContent).toContain("ARRIVED-DURING-FOCUS");
+    // The feed updated AND the arrival highlight still plays — Pomodoro
+    // running changed NOTHING (no EMPTY_FRESH swap, no mute).
+    expect(container.textContent).toContain("ARRIVED-DURING-POMODORO");
+    expect(container.innerHTML).toContain("animate-fresh-bubble");
   });
 
-  it("suppresses the arrival highlight animation while focused", () => {
+  it("a delta while idle also highlights normally (control case — same behaviour)", () => {
     mount(<Workbench initial={snapshot} />);
     const es = ControllableEventSource.current;
     if (!es) throw new Error("EventSource not constructed");
 
-    clickButtonByText("Start");
-    act(() => {
-      es.emit("sms.created", {
-        type: "sms.created",
-        seq: 1,
-        data: sms({
-          id: "10000000-0000-0000-0000-000000000002",
-          seq: 1,
-          body: "MUTED-BUBBLE",
-        }),
-      });
-    });
-
-    // Content is present (data not paused) but no fresh/highlight animation.
-    expect(container.textContent).toContain("MUTED-BUBBLE");
-    expect(container.innerHTML).not.toContain("animate-fresh-bubble");
-  });
-
-  it("resumes normal highlight rendering after Stop", () => {
-    mount(<Workbench initial={snapshot} />);
-    const es = ControllableEventSource.current;
-    if (!es) throw new Error("EventSource not constructed");
-
-    clickButtonByText("Start");
-    expect(container.textContent).toContain("Focus mode active");
-    clickButtonByText("Stop");
-    expect(container.textContent).not.toContain("Focus mode active");
-
-    // A delta after Stop highlights normally again.
     act(() => {
       es.emit("sms.created", {
         type: "sms.created",
         seq: 2,
         data: sms({
-          id: "10000000-0000-0000-0000-000000000003",
+          id: "10000000-0000-0000-0000-000000000002",
           seq: 2,
-          body: "POST-FOCUS-BUBBLE",
+          body: "ARRIVED-WHILE-IDLE",
         }),
       });
     });
-    expect(container.textContent).toContain("POST-FOCUS-BUBBLE");
+    expect(container.textContent).toContain("ARRIVED-WHILE-IDLE");
     expect(container.innerHTML).toContain("animate-fresh-bubble");
   });
 });

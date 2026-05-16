@@ -3,12 +3,15 @@
 /**
  * `PomodoroBox` — ported `.jsx → .tsx`, Tailwind-only (ADR-0007).
  *
- * ADR-0008: this is a LOCAL render-mute control only. Start/stop and the
- * countdown change *nothing* server-side — no data, scheduler, EventSource or
- * reducer is paused. While active, the parent merely suppresses arrival
- * highlight animations + toast popups; the feeds keep updating underneath. The
- * banner makes the non-authoritative nature explicit. SVG ring transition
- * respects `prefers-reduced-motion`.
+ * ADR-0014: this is a FULLY DECOUPLED, standalone local guidance timer. It
+ * affects NOTHING — no suppression of any notification surface, no banner,
+ * no coupling copy. Start/stop and the countdown change nothing server-side
+ * and nothing client-side outside this widget; the feeds, arrival highlights
+ * and toasts behave identically regardless. UX trim per
+ * ADR-0014: the countdown ring is shrunk (~62.5% of the prior diameter:
+ * 100px container vs. the previous 160px) and the descriptive sub-text /
+ * caption under the time is removed. SVG ring transition respects
+ * `prefers-reduced-motion`.
  */
 import {
   POMODORO_DURATIONS,
@@ -25,7 +28,11 @@ interface PomodoroBoxProps {
   onSetDuration: (m: PomodoroDuration) => void;
 }
 
-const R = 60;
+// ADR-0014 ring shrink: prior visible ring lived in a 160px box (r=60 in a
+// 132 viewBox). The widget is now ~62.5% of that — a 100px box, r=38 in a
+// 100 viewBox — a small, tasteful guidance dial that sits comfortably in its
+// panel rather than dominating it.
+const R = 38;
 const C = 2 * Math.PI * R;
 
 export function PomodoroBox({
@@ -48,53 +55,28 @@ export function PomodoroBox({
 
   return (
     <div className="flex flex-col gap-3 px-[18px] pb-[18px] pt-[14px]">
-      {active && (
-        <div
-          role="status"
-          className="flex items-start gap-[9px] rounded-card border border-line bg-teal-50 px-[14px] py-[10px] text-[12px] leading-snug text-teal-900"
-        >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            className="mt-[1px] h-[14px] w-[14px] flex-none"
-          >
-            <rect x="3" y="3" width="3.5" height="10" rx="1" />
-            <rect x="9.5" y="3" width="3.5" height="10" rx="1" />
-          </svg>
-          <span>
-            <strong className="font-semibold">Focus mode active</strong> —
-            notifications muted locally (still recorded; server unaffected).
-            The feeds keep updating underneath.
-          </span>
-        </div>
-      )}
-
       <div className="flex flex-col items-center gap-4 py-1">
-        <div className="relative grid h-[160px] w-[160px] place-items-center">
+        <div className="relative grid h-[100px] w-[100px] place-items-center">
           <svg
-            viewBox="0 0 132 132"
+            viewBox="0 0 100 100"
             className="h-full w-full -rotate-90"
             aria-hidden="true"
           >
             <circle
-              cx="66"
-              cy="66"
+              cx="50"
+              cy="50"
               r={R}
               fill="none"
               stroke="rgba(15,93,74,0.12)"
-              strokeWidth="8"
+              strokeWidth="6"
             />
             <circle
-              cx="66"
-              cy="66"
+              cx="50"
+              cy="50"
               r={R}
               fill="none"
               stroke="#0E5C47"
-              strokeWidth="8"
+              strokeWidth="6"
               strokeLinecap="round"
               strokeDasharray={C}
               strokeDashoffset={offset}
@@ -106,13 +88,8 @@ export function PomodoroBox({
             role="timer"
             aria-label="Pomodoro countdown"
           >
-            <div>
-              <div className="font-mono text-[30px] font-semibold tabular-nums text-ink-1">
-                {active ? `${mm}:${ss}` : `${durationMin}:00`}
-              </div>
-              <div className="mt-[2px] text-[11px] uppercase tracking-[0.16em] text-ink-3">
-                {active ? "focus · muted" : "ready"}
-              </div>
+            <div className="font-mono text-[19px] font-semibold tabular-nums text-ink-1">
+              {active ? `${mm}:${ss}` : `${durationMin}:00`}
             </div>
           </div>
         </div>
@@ -154,11 +131,6 @@ export function PomodoroBox({
           )}
         </div>
       </div>
-
-      <p className="font-serif text-[12px] italic leading-snug text-ink-3">
-        Focus mode mutes notification noise on this screen only (ADR-0008).
-        Nothing pauses server-side — data keeps flowing and is fully recorded.
-      </p>
     </div>
   );
 }

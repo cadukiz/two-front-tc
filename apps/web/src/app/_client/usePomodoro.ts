@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * `usePomodoro` — a purely LOCAL, NON-AUTHORITATIVE focus timer (ADR-0008).
+ * `usePomodoro` — a purely LOCAL, NON-AUTHORITATIVE guidance countdown
+ * (ADR-0014, superseding the Pomodoro clauses of ADR-0008/ADR-0012).
  *
- * Honest semantics: this hook owns nothing but a UI countdown. It does NOT
- * touch `useLiveState`, the `liveReducer`, the `EventSource`, the server
- * scheduler, or any domain data. While a Pomodoro is active the server keeps
- * emitting and the feeds keep updating exactly as before — the only thing the
- * UI does with `active` is *mute the visual notification noise* (suppress
- * arrival highlights/animations and toast popups) and show a banner. When it
- * ends, normal rendering simply resumes over the already-updated feeds.
+ * Honest semantics: this hook owns nothing but a UI countdown for the
+ * Pomodoro widget. It does NOT touch `useLiveState`, the `liveReducer`, the
+ * `EventSource`, the server scheduler, or any domain data — and, as of
+ * ADR-0014, it is consumed by NOTHING outside the widget itself. Starting or
+ * stopping a session is a complete no-op for the rest of the app: feeds,
+ * arrival highlights and toasts all behave identically whether or not a
+ * session is running. It is purely a guidance timer.
  *
  * The 1-second `setInterval` here is a pure display tick (like the header
  * clock) — it never seeds, schedules, or mutates data.
@@ -20,7 +21,7 @@ export const POMODORO_DURATIONS = [15, 25, 50] as const;
 export type PomodoroDuration = (typeof POMODORO_DURATIONS)[number];
 
 export interface PomodoroState {
-  /** True while a focus session is running (drives client-only render-mute). */
+  /** True while a guidance session is running (drives the widget UI only). */
   active: boolean;
   /** Milliseconds left in the current session (0 when idle/elapsed). */
   remainingMs: number;
@@ -61,7 +62,7 @@ export function usePomodoro(): PomodoroState {
       const e = endRef.current;
       setNow(Date.now());
       if (e != null && Date.now() >= e) {
-        setEndMs(null); // session elapsed → resume normal rendering
+        setEndMs(null); // session elapsed
       }
     }, 1000);
     return () => clearInterval(id);
