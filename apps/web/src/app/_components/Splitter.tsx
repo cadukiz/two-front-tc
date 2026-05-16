@@ -9,9 +9,20 @@
  * `grid-template-rows` (column split) string is **runtime-computed** and is the
  * ONE sanctioned `style={{}}` exception to ADR-0007 (a dynamic, non-themeable
  * value that cannot be a Tailwind class — see ADR-0013). Every *visible* style
- * (handle surface, grip, resize cursors, hover/active accent, the `min-h-0
- * min-w-0` containment discipline, motion-reduce) is a Tailwind utility against
- * our design tokens (`teal` #0E5C47 / `line` / `ink-*`), not the stock palette.
+ * (handle strip, grip, resize cursors, hover wash/accent, the `min-h-0
+ * min-w-0` containment discipline, motion-reduce) is a Tailwind utility.
+ *
+ * Handle affordance (ADR-0014): the 16px strip is fully transparent at rest
+ * (col/row-resize cursor); the centered grip is a 3×38 / 38×3 rounded rect in
+ * barely-visible #B5BEB8/40. On hover the whole strip gets a soft teal wash
+ * (rgba(15,93,74,0.05)), the grip recolors to brand teal #0E5C47 and scales
+ * 1.5× on its perpendicular axis — all on a 140ms default-ease transition.
+ * mousedown → the grip goes darker teal #084736 and HOLDS that for the entire
+ * drag (the active-drag handle index is mirrored into React state, so the
+ * pressed color persists even when the cursor leaves the strip mid-gesture —
+ * CSS `:active` would not). Release clears it → the grip fades back to its
+ * hover state if still hovered, else to the gray rest. motion-reduce disables
+ * the transform + transition.
  *
  * Mechanics (per spec): mousedown snapshots the pair's start sizes + container
  * px + total fr and attaches the move/up listeners on `window` (not the handle,
@@ -82,6 +93,11 @@ export function Splitter({
   const [sizes, setSizes] = useState<number[]>(() => [...initialSizes]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  // ADR-0014 affordance: mirror the actively-dragging handle index into React
+  // state so the pressed grip can hold its dark-teal #084736 for the ENTIRE
+  // gesture even when the cursor leaves the 16px strip — CSS `:active`/`:hover`
+  // alone would drop off the moment the pointer moves past the handle.
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
 
   const minForPane = useCallback(
     (i: number): number => {
@@ -107,6 +123,7 @@ export function Splitter({
         containerPx,
         sumFr,
       };
+      setDraggingIndex(index);
       document.body.style.cursor = isRow ? "col-resize" : "row-resize";
       document.body.style.userSelect = "none";
     },
@@ -145,6 +162,10 @@ export function Splitter({
     function onUp(): void {
       if (!dragRef.current) return;
       dragRef.current = null;
+      // Clear the pressed state → the grip fades back (140ms transition) to
+      // its teal hover state if the pointer is still over the strip, else to
+      // the gray rest state. CSS `:hover` resolves which on its own.
+      setDraggingIndex(null);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     }
@@ -198,6 +219,7 @@ export function Splitter({
     >
       {items.map((child, i) => {
         const isLast = i === items.length - 1;
+        const isPressed = draggingIndex === i;
         return (
           <Fragment key={isValidElement(child) && child.key != null ? child.key : i}>
             <div className="grid min-h-0 min-w-0 overflow-hidden">{child}</div>
@@ -210,35 +232,38 @@ export function Splitter({
                 onMouseDown={(e) => onMouseDown(i, e)}
                 onDoubleClick={() => onDoubleClick(i)}
                 className={[
+                  // ADR-0014 strip: 16px (the grid track), FULLY TRANSPARENT
+                  // at rest (no rest background); on hover the whole strip
+                  // gets a soft teal wash rgba(15,93,74,0.05) over 140ms.
                   "group relative flex items-center justify-center",
                   "select-none touch-none bg-transparent",
+                  "transition-colors duration-[140ms] motion-reduce:transition-none",
+                  "hover:bg-[rgba(15,93,74,0.05)]",
                   isRow
                     ? "cursor-col-resize h-full min-h-0"
                     : "cursor-row-resize w-full min-w-0",
                 ].join(" ")}
                 title="Drag to resize · double-click to reset"
               >
-                {/* Rest: a faint hairline on the design's `line` token.
-                    Hover/active: the brand `teal`. The grip is a small pill
-                    that scales up on hover (motion-reduce respected). */}
+                {/* ADR-0014 grip: a centered rounded rect — 3×38 (vertical) /
+                    38×3 (horizontal). Rest: #B5BEB8 at low opacity (barely
+                    visible). Hover: → brand teal #0E5C47 + 1.5× scale on the
+                    perpendicular axis. Pressed/dragging (React state, holds
+                    through a drag-past): → darker teal #084736. All on a
+                    140ms default-ease transition; motion-reduce disables the
+                    transform + transition. */}
                 <span
                   aria-hidden="true"
                   className={[
-                    "absolute bg-[rgba(15,93,74,0.14)]",
-                    "transition-colors duration-150 motion-reduce:transition-none",
-                    "group-hover:bg-teal group-active:bg-teal-900",
-                    isRow ? "inset-y-0 w-px left-1/2 -translate-x-1/2" : "inset-x-0 h-px top-1/2 -translate-y-1/2",
-                  ].join(" ")}
-                />
-                <span
-                  aria-hidden="true"
-                  className={[
-                    "relative rounded-pill bg-[rgba(15,93,74,0.22)]",
-                    "transition-[transform,background-color] duration-150 motion-reduce:transition-none",
-                    "group-hover:bg-teal group-active:bg-teal-900",
+                    "relative rounded-pill",
+                    "transition-[transform,background-color] duration-[140ms]",
+                    "motion-reduce:transition-none motion-reduce:transform-none",
+                    isPressed
+                      ? "bg-[#084736]"
+                      : "bg-[#B5BEB8]/40 group-hover:bg-[#0E5C47]",
                     isRow
-                      ? "h-9 w-[3px] group-hover:scale-y-110"
-                      : "w-9 h-[3px] group-hover:scale-x-110",
+                      ? `h-[38px] w-[3px] ${isPressed ? "" : "group-hover:scale-y-150"}`
+                      : `w-[38px] h-[3px] ${isPressed ? "" : "group-hover:scale-x-150"}`,
                   ].join(" ")}
                 />
               </div>

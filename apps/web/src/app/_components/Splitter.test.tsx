@@ -237,6 +237,114 @@ describe("Splitter — drag resize", () => {
   });
 });
 
+describe("Splitter — handle affordance (Wave 14 / ADR-0014 UX)", () => {
+  /** The grip span inside a separator (the inner non-strip element). */
+  function grip(h: HTMLElement): HTMLElement {
+    const spans = Array.from(h.querySelectorAll<HTMLElement>("span"));
+    const g = spans[spans.length - 1];
+    if (!g) throw new Error("grip span not found");
+    return g;
+  }
+
+  it("the strip is fully transparent at rest (no rest background)", () => {
+    mount(
+      <Splitter direction="row" initialSizes={[1, 1]} minPx={50}>
+        <div>A</div>
+        <div>B</div>
+      </Splitter>,
+    );
+    const [h] = handles();
+    expect(h!.className).toContain("bg-transparent");
+    // The teal wash exists ONLY as a `hover:` variant — never an
+    // unprefixed (rest) background.
+    expect(h!.className).toContain("hover:bg-[rgba(15,93,74,0.05)]");
+    expect(h!.className).not.toMatch(/(^|\s)bg-\[rgba\(15,93,74,0\.05\)\]/);
+  });
+
+  it("the grip rests barely-visible gray and is NOT the pressed teal", () => {
+    mount(
+      <Splitter direction="row" initialSizes={[1, 1]} minPx={50}>
+        <div>A</div>
+        <div>B</div>
+      </Splitter>,
+    );
+    const [h] = handles();
+    const g = grip(h!);
+    // Low-alpha #B5BEB8 grip at rest…
+    expect(g.className).toContain("#B5BEB8");
+    // …and definitely not the pressed dark-teal yet.
+    expect(g.className).not.toContain("#084736");
+  });
+
+  it("holds the pressed dark-teal grip through the WHOLE drag even past the strip (React state, not :active)", () => {
+    mount(
+      <Splitter direction="row" initialSizes={[1, 1]} minPx={50}>
+        <div>A</div>
+        <div>B</div>
+      </Splitter>,
+    );
+    stubContainerRect(800, 600);
+    const [h] = handles();
+
+    act(() => {
+      h!.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          clientX: 400,
+          clientY: 0,
+        }),
+      );
+    });
+    // Pressed grip shows the dark-teal #084736 on the dragged handle.
+    expect(grip(h!).className).toContain("#084736");
+
+    // Drag the pointer FAR past the strip — the pressed color must hold
+    // (CSS :active would have dropped off when the cursor left the element).
+    act(() => {
+      window.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 5000,
+          clientY: 0,
+        }),
+      );
+    });
+    expect(grip(h!).className).toContain("#084736");
+
+    // Release → the pressed state clears (back to gray/hover via fade).
+    act(() => {
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    expect(grip(h!).className).not.toContain("#084736");
+  });
+
+  it("only the dragged handle holds the pressed color (siblings unaffected)", () => {
+    mount(
+      <Splitter direction="row" initialSizes={[1, 1, 1]} minPx={50}>
+        <div>A</div>
+        <div>B</div>
+        <div>C</div>
+      </Splitter>,
+    );
+    stubContainerRect(900, 600);
+    const [h0, h1] = handles();
+    act(() => {
+      h0!.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          clientX: 300,
+          clientY: 0,
+        }),
+      );
+    });
+    expect(grip(h0!).className).toContain("#084736");
+    expect(grip(h1!).className).not.toContain("#084736");
+    act(() => {
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+  });
+});
+
 describe("Splitter — double-click reset", () => {
   it("resets the pair to its average on handle double-click", () => {
     mount(
