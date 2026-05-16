@@ -68,7 +68,6 @@ const immediateEmail: Email = {
   body: "A new task was just added to your queue.",
   taskId: TASK_ID,
   pendingTitles: null,
-  emailCycle: 0,
   createdAt: 1_700_000_000_000,
 };
 
@@ -80,7 +79,6 @@ const summaryEmail: Email = {
   body: "",
   taskId: null,
   pendingTitles: [],
-  emailCycle: 0,
   createdAt: 1_700_000_000_000,
 };
 

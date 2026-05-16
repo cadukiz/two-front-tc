@@ -7,7 +7,13 @@
  *
  * Types & schema come from `@twofront/domain` — never redefined here.
  */
-import type { Task, Email, Sms, Config, SseEvent } from "@twofront/domain";
+import type {
+  Task,
+  Email,
+  Sms,
+  RuntimeConfig,
+  SseEvent,
+} from "@twofront/domain";
 
 export interface LiveState {
   tasks: Task[];
@@ -16,12 +22,13 @@ export interface LiveState {
   /** Highest `seq` applied so far — the reconnect dedupe key (ADR-0006 D5). */
   lastSeq: number;
   /**
-   * Server-resolved runtime config (ADR-0004/0005), carried straight from the
-   * authoritative snapshot. Env-driven and read-only on the client — the
-   * time-controls panel renders it but can never mutate it (ADR-0008). `null`
-   * only before the first snapshot has seeded the state.
+   * Server-authoritative runtime cadence config (ADR-0009 — the 3 user-facing
+   * ints; `tickMs` is internal/test-only and never reaches the client). Seeded
+   * by every snapshot and updated by `config.updated` SSE frames so the
+   * sliders stay in sync across all clients. `null` only before the first
+   * snapshot has seeded the state.
    */
-  config: Config | null;
+  config: RuntimeConfig | null;
 }
 
 export const EMPTY_LIVE_STATE: LiveState = {
@@ -67,10 +74,19 @@ export function liveReducer(state: LiveState, event: SseEvent): LiveState {
       emails: sortBySeqDesc(snap.emails),
       sms: sortBySeqDesc(snap.sms),
       lastSeq: snap.lastSeq,
-      // Authoritative, env-driven config — re-seeded with every snapshot
-      // (it never changes at runtime, ADR-0004/0005); the client only reads it.
+      // Authoritative runtime config — re-seeded with every snapshot
+      // (ADR-0009); the client renders it and reconciles slider state to it.
       config: snap.config,
     };
+  }
+
+  // `config.updated` is last-write-wins, NOT an id-keyed feed record and not a
+  // reconnect-dedupe concern: a re-seeding snapshot already carries the latest
+  // config. Apply it without touching `lastSeq` or the `seq <= lastSeq` gate so
+  // a client's optimistic slider value is reconciled to the server's truth
+  // (ADR-0009), while the ordering contract for the feeds is unchanged.
+  if (event.type === "config.updated") {
+    return { ...state, config: event.data };
   }
 
   // Delta: drop anything already covered by the seeding snapshot.

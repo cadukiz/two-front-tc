@@ -17,7 +17,7 @@
  * reflects the live `useLiveState` connection state.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Snapshot } from "@twofront/domain";
+import type { RuntimeConfig, Snapshot } from "@twofront/domain";
 import { useLiveState } from "./useLiveState";
 import { useFreshIds } from "./useFreshIds";
 import { AppHeader } from "../components/AppHeader";
@@ -81,6 +81,25 @@ export function Workbench({ initial }: WorkbenchProps) {
   const dismissToast = useCallback((id: string): void => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // ADR-0009: the Time Controls sliders debounce into this single-field
+  // `PATCH /api/config`. The server stays authoritative — the response (and
+  // the broadcast `config.updated` SSE frame) reconcile every client's
+  // optimistic value; this callback only does the HTTP round-trip and rethrows
+  // so `TimeControlsBox` can surface a toast on failure.
+  const patchConfig = useCallback(
+    async (patch: Partial<RuntimeConfig>): Promise<void> => {
+      const res = await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        throw new Error(`PATCH /api/config failed: ${res.status}`);
+      }
+    },
+    [],
+  );
 
   const pending = useMemo(
     () => tasks.filter((t) => t.status === "pending"),
@@ -486,11 +505,15 @@ export function Workbench({ initial }: WorkbenchProps) {
                       aria-hidden="true"
                       className="mx-[8px] mb-px inline-block h-[5px] w-[5px] rounded-full bg-teal align-middle"
                     />
-                    server config
+                    all clients
                   </>
                 }
               >
-                <TimeControlsBox config={config} />
+                <TimeControlsBox
+                  config={config}
+                  onPatch={patchConfig}
+                  onError={pushToast}
+                />
               </Panel>
             </div>
           </div>

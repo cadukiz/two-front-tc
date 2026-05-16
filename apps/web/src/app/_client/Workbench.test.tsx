@@ -52,7 +52,11 @@ const emptySnapshot: Snapshot = {
   emails: [],
   sms: [],
   lastSeq: 0,
-  config: { tickMs: 60000, fibonacciResetMinutes: 7, emailResetMinutes: 7 },
+  config: {
+    emailSummaryIntervalMinutes: 1,
+    smsBaseIntervalMinutes: 1,
+    fibonacciResetDays: 1,
+  },
 };
 
 describe("Workbench smoke render", () => {

@@ -15,7 +15,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import {
   SseEventSchema,
   SSE_EVENT_TYPES,
-  type Config,
+  type RuntimeConfig,
   type Snapshot,
   type SseEvent,
 } from "@twofront/domain";
@@ -36,10 +36,11 @@ export interface LiveStateResult {
   emails: LiveState["emails"];
   sms: LiveState["sms"];
   /**
-   * Authoritative server config (read-only display, ADR-0008). Seeded from the
-   * SSR snapshot so it is non-null from the first paint.
+   * Authoritative runtime cadence config (ADR-0009 — the 3 user-facing ints).
+   * Seeded from the SSR snapshot so it is non-null from the first paint, then
+   * kept in sync by `config.updated` SSE frames.
    */
-  config: Config;
+  config: RuntimeConfig;
   connection: Connection;
 }
 

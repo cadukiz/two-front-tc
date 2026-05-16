@@ -18,7 +18,6 @@ const email = (over: Partial<Email> & Pick<Email, "id" | "seq">): Email => ({
   body: "b",
   taskId: null,
   pendingTitles: [],
-  emailCycle: 0,
   createdAt: 0,
   ...over,
 });
@@ -38,7 +37,11 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   emails: [],
   sms: [],
   lastSeq: 0,
-  config: { tickMs: 60000, fibonacciResetMinutes: 7, emailResetMinutes: 7 },
+  config: {
+    emailSummaryIntervalMinutes: 1,
+    smsBaseIntervalMinutes: 1,
+    fibonacciResetDays: 1,
+  },
   ...over,
 });
 
@@ -208,5 +211,60 @@ describe("liveReducer — newest-first ordering by seq", () => {
     });
     expect(s.sms.map((m) => m.id)).toEqual(["m3"]);
     expect(s.lastSeq).toBe(3);
+  });
+});
+
+describe("liveReducer — config.updated (ADR-0009)", () => {
+  it("snapshot seeds config; config.updated replaces it without touching lastSeq/feeds", () => {
+    const seeded = liveReducer(
+      EMPTY_LIVE_STATE,
+      snap(
+        snapshot({
+          sms: [sms({ id: "m1", seq: 2 })],
+          lastSeq: 2,
+        }),
+      ),
+    );
+    expect(seeded.config).toEqual({
+      emailSummaryIntervalMinutes: 1,
+      smsBaseIntervalMinutes: 1,
+      fibonacciResetDays: 1,
+    });
+
+    const next = liveReducer(seeded, {
+      type: "config.updated",
+      seq: 3,
+      data: {
+        emailSummaryIntervalMinutes: 5,
+        smsBaseIntervalMinutes: 2,
+        fibonacciResetDays: 9,
+      },
+    });
+    expect(next.config).toEqual({
+      emailSummaryIntervalMinutes: 5,
+      smsBaseIntervalMinutes: 2,
+      fibonacciResetDays: 9,
+    });
+    // Feeds + dedupe key untouched (config is not an id/seq-keyed record).
+    expect(next.sms.map((m) => m.id)).toEqual(["m1"]);
+    expect(next.lastSeq).toBe(2);
+  });
+
+  it("applies even when its seq is <= lastSeq (last-write-wins, not gated)", () => {
+    const seeded = liveReducer(
+      EMPTY_LIVE_STATE,
+      snap(snapshot({ lastSeq: 10 })),
+    );
+    const next = liveReducer(seeded, {
+      type: "config.updated",
+      seq: 4,
+      data: {
+        emailSummaryIntervalMinutes: 7,
+        smsBaseIntervalMinutes: 7,
+        fibonacciResetDays: 7,
+      },
+    });
+    expect(next.config?.smsBaseIntervalMinutes).toBe(7);
+    expect(next.lastSeq).toBe(10);
   });
 });

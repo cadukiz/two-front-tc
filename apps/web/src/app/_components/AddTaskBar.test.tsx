@@ -57,7 +57,6 @@ const validResponse = {
     body: "A new task was just added.",
     taskId: "11111111-1111-1111-1111-111111111111",
     pendingTitles: null,
-    emailCycle: 0,
     createdAt: 1_700_000_000_000,
   },
 };

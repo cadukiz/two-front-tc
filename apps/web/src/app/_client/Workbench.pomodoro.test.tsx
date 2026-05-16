@@ -72,7 +72,11 @@ const snapshot: Snapshot = {
   emails: [],
   sms: [],
   lastSeq: 0,
-  config: { tickMs: 60000, fibonacciResetMinutes: 7, emailResetMinutes: 7 },
+  config: {
+    emailSummaryIntervalMinutes: 1,
+    smsBaseIntervalMinutes: 1,
+    fibonacciResetDays: 1,
+  },
 };
 
 const sms = (over: Pick<Sms, "id" | "seq" | "body">): Sms => ({

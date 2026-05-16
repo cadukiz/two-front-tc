@@ -83,7 +83,6 @@ const email = (id: string, seq: number, subject: string): Email => ({
   body: "b",
   taskId: null,
   pendingTitles: [],
-  emailCycle: 0,
   createdAt: 0,
 });
 
@@ -107,7 +106,11 @@ const snapshot: Snapshot = {
   emails: [email("e0000000-0000-0000-0000-000000000001", 5, "EMAIL-ONE")],
   sms: [sms("50000000-0000-0000-0000-000000000001", 4, "SMS-ONE")],
   lastSeq: 5,
-  config: { tickMs: 60000, fibonacciResetMinutes: 7, emailResetMinutes: 7 },
+  config: {
+    emailSummaryIntervalMinutes: 1,
+    smsBaseIntervalMinutes: 1,
+    fibonacciResetDays: 1,
+  },
 };
 
 function pendingTitlesInOrder(): string[] {

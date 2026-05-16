@@ -1,14 +1,23 @@
-import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterEach,
+  vi,
+} from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { Config } from "@twofront/domain";
+import type { RuntimeConfig } from "@twofront/domain";
 import { TimeControlsBox } from "./TimeControlsBox";
 
 /**
- * Wave 9.1 — TimeControlsBox is a strictly READ-ONLY mirror of the
- * authoritative server config (ADR-0008). It must render the injected
- * `tickMs` / `fibonacciResetMinutes` / `emailResetMinutes` and must NOT
- * expose any input that could mutate server state or cadence.
+ * Wave 10 — TimeControlsBox is now THREE interactive integer sliders
+ * (ADR-0009): Email summary (1–100 min), SMS pace (1–100 min), Fibonacci
+ * reset (1–100 days). It is seeded from the live `config`, debounces changes
+ * to `onPatch`, optimistically reflects the local value, and reconciles to a
+ * new server `config` prop. NOTHING about "simulated minute" / `tickMs` is
+ * rendered (that lever is internal/test-only and removed from the UI).
  */
 beforeAll(() => {
   (
@@ -31,54 +40,130 @@ function mount(node: React.ReactElement): void {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-const config: Config = {
-  tickMs: 60000,
-  fibonacciResetMinutes: 13,
-  emailResetMinutes: 21,
+const config: RuntimeConfig = {
+  emailSummaryIntervalMinutes: 4,
+  smsBaseIntervalMinutes: 9,
+  fibonacciResetDays: 13,
 };
 
-describe("TimeControlsBox (read-only server config)", () => {
-  it("renders the injected config values", () => {
-    mount(<TimeControlsBox config={config} />);
-    const text = container.textContent ?? "";
-    expect(text).toContain("60,000 ms");
-    expect(text).toContain("every 13 min");
-    expect(text).toContain("every 21 min");
+function ranges(): HTMLInputElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLInputElement>('input[type="range"]'),
+  );
+}
+
+function setRange(el: HTMLInputElement, value: number): void {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(el, String(value));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+describe("TimeControlsBox — interactive sliders (ADR-0009)", () => {
+  it("renders exactly three integer range sliders seeded from config", () => {
+    mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
+    const r = ranges();
+    expect(r).toHaveLength(3);
+    for (const el of r) {
+      expect(el.min).toBe("1");
+      expect(el.max).toBe("100");
+      expect(el.step).toBe("1");
+    }
+    const [email, sms, fib] = r;
+    expect(email!.value).toBe("4");
+    expect(sms!.value).toBe("9");
+    expect(fib!.value).toBe("13");
   });
 
-  it("renders a caption clarifying it is read-only / server-driven", () => {
-    mount(<TimeControlsBox config={config} />);
+  it("labels show the current value + unit", () => {
+    mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("4 min");
+    expect(text).toContain("9 min");
+    expect(text).toContain("13 days");
+  });
+
+  it("does NOT render anything about simulated minutes / tickMs / read-only", () => {
+    mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
     const text = (container.textContent ?? "").toLowerCase();
-    expect(text).toContain("read-only");
-    expect(text).toContain("server remains authoritative");
+    expect(text).not.toContain("simulated");
+    expect(text).not.toContain("tickms");
+    expect(text).not.toContain("tick");
+    expect(text).not.toContain("millisecond");
+    expect(text).not.toContain("read-only");
+    // No "1 (simulated) minute = N ms" style time-model row.
+    expect(text).not.toMatch(/\d+\s*ms\b/);
   });
 
-  it("exposes NO mutating inputs (no input/range/form/submit button)", () => {
-    mount(<TimeControlsBox config={config} />);
-    expect(container.querySelectorAll("input")).toHaveLength(0);
-    expect(
-      container.querySelectorAll('input[type="range"]'),
-    ).toHaveLength(0);
-    expect(container.querySelectorAll("form")).toHaveLength(0);
-    expect(container.querySelectorAll("button")).toHaveLength(0);
+  it("optimistically reflects the moved value immediately", () => {
+    mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
+    const [email] = ranges();
+    setRange(email!, 42);
+    expect(email!.value).toBe("42");
+    expect(container.textContent).toContain("42 min");
   });
 
-  it("reflects different server config without any local override", () => {
+  it("debounces and PATCHes the changed field once after the debounce window", () => {
+    vi.useFakeTimers();
+    const onPatch = vi.fn(async () => {});
     mount(
-      <TimeControlsBox
-        config={{
-          tickMs: 50,
-          fibonacciResetMinutes: 4,
-          emailResetMinutes: 9,
-        }}
-      />,
+      <TimeControlsBox config={config} onPatch={onPatch} onError={vi.fn()} />,
     );
-    const text = container.textContent ?? "";
-    expect(text).toContain("50 ms");
-    expect(text).toContain("every 4 min");
-    expect(text).toContain("every 9 min");
+    const [, sms] = ranges();
+    setRange(sms!, 20);
+    setRange(sms!, 30);
+    setRange(sms!, 50);
+    expect(onPatch).not.toHaveBeenCalled(); // still within debounce
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(onPatch).toHaveBeenCalledWith({ smsBaseIntervalMinutes: 50 });
+  });
+
+  it("reconciles to a new server config prop (config.updated authority)", () => {
+    mount(<TimeControlsBox config={config} onPatch={vi.fn()} onError={vi.fn()} />);
+    const [email] = ranges();
+    setRange(email!, 77); // local optimistic
+    expect(email!.value).toBe("77");
+
+    act(() => {
+      root.render(
+        <TimeControlsBox
+          config={{ ...config, emailSummaryIntervalMinutes: 8 }}
+          onPatch={vi.fn()}
+          onError={vi.fn()}
+        />,
+      );
+    });
+    // Server is authoritative — the slider snaps to the broadcast value.
+    expect(ranges()[0]!.value).toBe("8");
+  });
+
+  it("calls onError when the PATCH callback rejects", async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const onPatch = vi.fn(async () => {
+      throw new Error("network");
+    });
+    mount(
+      <TimeControlsBox config={config} onPatch={onPatch} onError={onError} />,
+    );
+    const [, , fib] = ranges();
+    setRange(fib!, 60);
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onError).toHaveBeenCalled();
   });
 });
