@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RuntimeConfig, Snapshot } from "@twofront/domain";
 import { useLiveState } from "./useLiveState";
 import { useFreshIds } from "./useFreshIds";
+import { useIsDesktop } from "./useIsDesktop";
 import { AppHeader } from "../components/AppHeader";
 import { Panel, Empty } from "../components/Panel";
 import {
@@ -57,6 +58,11 @@ let toastSeq = 0;
 
 export function Workbench({ initial }: WorkbenchProps) {
   const { tasks, emails, sms, config, connection } = useLiveState(initial);
+
+  // Wave 13 (ADR-0013): pick the layout arrangement. Exactly one of the
+  // desktop Splitter tree / the narrow stacked fallback is mounted — never
+  // both — so interactive elements + aria regions are never duplicated.
+  const isDesktop = useIsDesktop();
 
   // Live ticking clock (client-only; avoids SSR hydration drift). This 1-second
   // `setInterval` is the ONLY client cadence and exists solely to advance the
@@ -532,53 +538,68 @@ export function Workbench({ initial }: WorkbenchProps) {
     // `h-screen overflow-hidden` — rule 1). `flex-1 min-h-0` makes the layout
     // area exactly fill the space under the (flex-none) header; nothing
     // overflows the viewport — each feed scrolls inside its own Panel.
+    //
+    // EXACTLY ONE arrangement is mounted (never both): a CSS `hidden`/`lg:`
+    // switch would leave both subtrees in the DOM, duplicating every
+    // interactive element / aria region. `useIsDesktop` (matchMedia) picks
+    // one; SSR/first paint = desktop, deterministic (no hydration drift).
     <div className="flex h-screen min-h-0 flex-col">
       <AppHeader connection={connection} now={now} />
 
-      {/*
-        Desktop (≥ lg / 1024px): the resizable Splitter tree. Every divider is
-        drag-resizable at any nesting depth; double-click a handle resets that
-        pair. Composition preserves the established hierarchy — Tasks prominent
-        on the left; the right side stacks Emails over (SMS + the
-        Pomodoro/Time-controls column).
-      */}
-      <div className="hidden min-h-0 min-w-0 flex-1 px-[22px] pb-[22px] pt-[18px] lg:block">
-        <Splitter
-          direction="row"
-          initialSizes={[1.15, 1]}
-          minPx={[360, 360]}
-          className="gap-0"
-        >
-          {tasksPanel}
-          <Splitter direction="col" initialSizes={[1, 1]} minPx={[200, 220]}>
-            {emailsPanel}
-            <Splitter direction="row" initialSizes={[1.4, 1]} minPx={[260, 240]}>
-              {smsPanel}
-              <Splitter direction="col" initialSizes={[1, 1]} minPx={[170, 170]}>
-                {pomodoroPanel}
-                {timeControlsPanel}
+      {isDesktop ? (
+        /*
+          Desktop (≥ lg / 1024px): the resizable Splitter tree. Every divider
+          is drag-resizable at any nesting depth; double-click a handle resets
+          that pair. Composition preserves the established hierarchy — Tasks
+          prominent on the left; the right side stacks Emails over (SMS + the
+          Pomodoro/Time-controls column).
+        */
+        <div className="min-h-0 min-w-0 flex-1 px-[22px] pb-[22px] pt-[18px]">
+          <Splitter
+            direction="row"
+            initialSizes={[1.15, 1]}
+            minPx={[360, 360]}
+          >
+            {tasksPanel}
+            <Splitter direction="col" initialSizes={[1, 1]} minPx={[200, 220]}>
+              {emailsPanel}
+              <Splitter
+                direction="row"
+                initialSizes={[1.4, 1]}
+                minPx={[260, 240]}
+              >
+                {smsPanel}
+                <Splitter
+                  direction="col"
+                  initialSizes={[1, 1]}
+                  minPx={[170, 170]}
+                >
+                  {pomodoroPanel}
+                  {timeControlsPanel}
+                </Splitter>
               </Splitter>
             </Splitter>
           </Splitter>
-        </Splitter>
-      </div>
-
-      {/*
-        Small-screen fallback (< lg). The drag-resize spec is desktop-oriented
-        and the Splitter `minPx` clamps make 5 panes un-fittable on a phone, so
-        below the breakpoint we drop the Splitter entirely and stack all five
-        panels vertically. The stack is the page's ONE scroll region
-        (`overflow-y-auto`, the body stays `overflow-hidden`); each panel keeps
-        a sensible min-height so every section stays reachable — the brief's
-        "all sections visible/reachable" intent is preserved on mobile.
-      */}
-      <div className="flex min-h-0 flex-1 flex-col gap-[14px] overflow-y-auto p-[14px] lg:hidden">
-        <div className="min-h-[440px] shrink-0">{tasksPanel}</div>
-        <div className="min-h-[340px] shrink-0">{emailsPanel}</div>
-        <div className="min-h-[300px] shrink-0">{smsPanel}</div>
-        <div className="min-h-[260px] shrink-0">{pomodoroPanel}</div>
-        <div className="min-h-[240px] shrink-0">{timeControlsPanel}</div>
-      </div>
+        </div>
+      ) : (
+        /*
+          Small-screen fallback (< lg). The drag-resize spec is
+          desktop-oriented and the Splitter `minPx` clamps make 5 panes
+          un-fittable on a phone, so below the breakpoint we drop the Splitter
+          entirely and stack all five panels vertically. The stack is the
+          page's ONE scroll region (`overflow-y-auto`, the body stays
+          `overflow-hidden`); each panel keeps a sensible min-height so every
+          section stays reachable — the brief's "all sections visible /
+          reachable" intent is preserved on mobile.
+        */
+        <div className="flex min-h-0 flex-1 flex-col gap-[14px] overflow-y-auto p-[14px]">
+          <div className="min-h-[440px] shrink-0">{tasksPanel}</div>
+          <div className="min-h-[340px] shrink-0">{emailsPanel}</div>
+          <div className="min-h-[300px] shrink-0">{smsPanel}</div>
+          <div className="min-h-[260px] shrink-0">{pomodoroPanel}</div>
+          <div className="min-h-[240px] shrink-0">{timeControlsPanel}</div>
+        </div>
+      )}
 
       {/* Focus mode suppresses toast popups (the queue is untouched — nothing
           is lost; the server is unaffected). They resume when focus ends. */}

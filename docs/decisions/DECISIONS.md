@@ -1,6 +1,6 @@
 # Decision Log (handoff mirror)
 
-> Canonical: planner repo `notes/Decisions Log.md`. Read-only mirror so the public submission carries the full ADR set.
+> Canonical: planner repo `notes/Decisions Log.md`. Read-only mirror.
 
 ---
 
@@ -185,3 +185,13 @@
 - **SMS caption copy:** `Fibonacci #{n} · every {m}m` → `Fibonacci #{n} - Next message in {m}m`. Note: `fibMinute` is technically the gap that *preceded* this send; the "next message in" wording was the user's explicit, conscious copy choice (clearer for users) — recorded so it is a deliberate decision, not an inaccuracy.
 
 **Trade-off accepted:** minor wording imprecision (`fibMinute` framed as "next") accepted for user-facing clarity; startup pair adds two boot-time notifications by design. All committed as a single wave per the user's "merge into one" instruction.
+
+---
+
+## ADR-0013 — Resizable Splitter system; sanctioned inline-style exception to ADR-0007
+
+**Context:** User requested a generic, nestable `<Splitter>` resizable-panel system (drag handles, viewport-fill, internal scroll). Dynamic `grid-template-columns/rows` are runtime-computed from fractional sizes in React state and **cannot** be Tailwind utility classes.
+
+**Decision (user-specified spec):** introduce `Splitter` with **one sanctioned `style={{ gridTemplateColumns/Rows }}` inline-style exception** to ADR-0007. This is the standard Tailwind-recommended pattern for runtime-computed values; **every *visible* style remains a Tailwind utility** (handles, cursors, hover/active affordances, the `min-h-0 min-w-0` chain, per-panel `flex-col min-h-0 overflow-hidden` + `flex-none` header + `flex-1 min-h-0 overflow-y-auto` body). App shell becomes `h-screen overflow-hidden`; layout never overflows — panels scroll internally.
+
+**Rationale:** ADR-0007's intent is "no bespoke CSS files / styled-components / CSS modules / design-token CSS vars" — not "never use React `style` for a genuinely dynamic, non-themeable value." A single computed grid-track string is the textbook exception and is explicitly scoped/documented so the Tailwind-only guarantee stays verifiable (still exactly one CSS file; no `styled`/module/`<style>`). **Trade-off accepted:** one documented inline `style` for runtime grid tracks vs. an impossible-in-pure-Tailwind requirement; net capability gain (arbitrary nested resizable layout) at zero bespoke-CSS cost.
