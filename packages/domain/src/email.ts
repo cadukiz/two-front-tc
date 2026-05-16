@@ -20,11 +20,6 @@ export const EmailSchema = z.object({
    * empty summaries still fire (ADR-0004). `null` for `immediate`.
    */
   pendingTitles: z.array(z.string()).nullable(),
-  /**
-   * Which email-reset cycle this email belongs to. Increments every
-   * `emailResetMinutes` (ADR-0005); makes the reset observable/E2E-assertable.
-   */
-  emailCycle: z.number().int().nonnegative(),
   /** Epoch ms — display only. */
   createdAt: z.number().int().nonnegative(),
 });

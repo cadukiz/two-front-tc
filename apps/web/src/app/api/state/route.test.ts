@@ -15,8 +15,10 @@ function resetSingletons(): void {
 
 beforeEach(() => {
   process.env.TICK_MS = "60";
-  process.env.FIBONACCI_RESET_MINUTES = "7";
-  process.env.EMAIL_RESET_MINUTES = "7";
+  // ADR-0009: cadence vars all default; clear them for isolation.
+  delete process.env.EMAIL_SUMMARY_INTERVAL_MINUTES;
+  delete process.env.SMS_BASE_INTERVAL_MINUTES;
+  delete process.env.FIBONACCI_RESET_DAYS;
   resetSingletons();
 });
 

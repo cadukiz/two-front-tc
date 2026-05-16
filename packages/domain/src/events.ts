@@ -3,6 +3,7 @@ import { TaskSchema } from "./task";
 import { EmailSchema } from "./email";
 import { SmsSchema } from "./sms";
 import { SnapshotSchema } from "./snapshot";
+import { RuntimeConfigSchema } from "./config";
 
 /**
  * SSE payloads. Every `data:` frame validates against this discriminated union
@@ -36,6 +37,13 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     seq: z.number().int().nonnegative(),
     data: SmsSchema,
   }),
+  z.object({
+    // ADR-0009: runtime config changed (via `PATCH /api/config`). Broadcast so
+    // every connected client reconciles its optimistic slider values.
+    type: z.literal("config.updated"),
+    seq: z.number().int().nonnegative(),
+    data: RuntimeConfigSchema,
+  }),
 ]);
 export type SseEvent = z.infer<typeof SseEventSchema>;
 
@@ -45,5 +53,6 @@ export const SSE_EVENT_TYPES = [
   "task.completed",
   "email.created",
   "sms.created",
+  "config.updated",
 ] as const;
 export type SseEventType = (typeof SSE_EVENT_TYPES)[number];

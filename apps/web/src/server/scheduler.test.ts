@@ -1,24 +1,28 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import type { Config } from "@twofront/domain";
+import { MINUTES_PER_DAY, type Config } from "@twofront/domain";
 import { createStore, type Store } from "./store";
 import { createScheduler } from "./scheduler";
 
 /**
- * Injected config literal — no `process.env`, no real timers. Reset windows are
- * set wide (100) by default so they never interfere with cadence/SMS tests; the
- * reset tests override them with their own `createStore`.
+ * Injected config literal — no `process.env`, no real timers. `fibonacciResetDays`
+ * is set wide by default so the day-based window (× 1440) never interferes with
+ * cadence/SMS tests; the reset test overrides it with its own `createStore`.
  */
 const CONFIG: Config = {
   tickMs: 60,
-  fibonacciResetMinutes: 100,
-  emailResetMinutes: 100,
+  emailSummaryIntervalMinutes: 1,
+  smsBaseIntervalMinutes: 1,
+  fibonacciResetDays: 100,
 };
 
 const summaryEmails = (store: Store) =>
   store.snapshot().emails.filter((e) => e.kind === "summary");
 
-describe("createScheduler — summary email cadence (ADR-0004)", () => {
-  it("creates one summary email every tick, even with 0 pending tasks", () => {
+const sentSms = (store: Store) =>
+  store.snapshot().sms.slice().sort((a, b) => a.seq - b.seq);
+
+describe("createScheduler — summary email cadence (ADR-0009)", () => {
+  it("creates one summary email every tick at the default interval (1)", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
 
@@ -28,8 +32,16 @@ describe("createScheduler — summary email cadence (ADR-0004)", () => {
     expect(summaries).toHaveLength(10);
     for (const s of summaries) {
       expect(s.pendingTitles).toEqual([]);
-      expect(s.emailCycle).toBe(0);
+      expect("emailCycle" in s).toBe(false);
     }
+  });
+
+  it("fires only every N minutes when emailSummaryIntervalMinutes = N", () => {
+    const store = createStore({ ...CONFIG, emailSummaryIntervalMinutes: 3 });
+    const scheduler = createScheduler(store);
+    for (let i = 0; i < 10; i += 1) scheduler.tick();
+    // minutes 3, 6, 9 → 3 summaries.
+    expect(summaryEmails(store)).toHaveLength(3);
   });
 
   it("summary email reflects pending titles created before the tick", () => {
@@ -43,15 +55,14 @@ describe("createScheduler — summary email cadence (ADR-0004)", () => {
   });
 });
 
-describe("createScheduler — Fibonacci SMS cadence (ADR-0004)", () => {
-  it("sends SMS only at cumulative minutes 1,2,4,7,12,20 with correct fibIndex/fibMinute", () => {
+describe("createScheduler — Fibonacci SMS cadence (ADR-0004/0009)", () => {
+  it("sends SMS at cumulative minutes 1,2,4,7,12,20 with correct fibIndex/fibMinute (base 1)", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
 
-    // Run enough minutes to cover the first six sends (cumulative max = 20).
     for (let i = 0; i < 25; i += 1) scheduler.tick();
 
-    const sent = store.snapshot().sms.slice().sort((a, b) => a.seq - b.seq);
+    const sent = sentSms(store);
     expect(sent).toHaveLength(6);
 
     const expected = [
@@ -73,7 +84,6 @@ describe("createScheduler — Fibonacci SMS cadence (ADR-0004)", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
 
-    // Minute 3 is between marks 2 and 4 → no send lands exactly there.
     scheduler.tick(); // m1 → send #1
     scheduler.tick(); // m2 → send #2
     expect(store.snapshot().sms).toHaveLength(2);
@@ -82,62 +92,120 @@ describe("createScheduler — Fibonacci SMS cadence (ADR-0004)", () => {
     scheduler.tick(); // m4 → send #3
     expect(store.snapshot().sms).toHaveLength(3);
   });
+
+  it("scales the SMS gaps by smsBaseIntervalMinutes (base 2 ⇒ sends at 2,4,8,14)", () => {
+    const store = createStore({ ...CONFIG, smsBaseIntervalMinutes: 2 });
+    const scheduler = createScheduler(store);
+    for (let i = 0; i < 15; i += 1) scheduler.tick();
+    const sent = sentSms(store);
+    // gaps F(k)×2 = 2,2,4,6,10 → cumulative minutes 2,4,8,14.
+    const minutes = sent.map((s) => s.fibIndex);
+    expect(minutes).toEqual([1, 2, 3, 4]);
+    expect(sent.map((s) => s.fibMinute)).toEqual([2, 2, 4, 6]);
+    expect(sent).toHaveLength(4);
+  });
 });
 
-describe("createScheduler — Fibonacci reset (ADR-0005)", () => {
-  it("restarts the sequence after fibonacciResetMinutes; no SMS on the reset minute", () => {
-    const store = createStore({
-      tickMs: 60,
-      fibonacciResetMinutes: 7,
-      emailResetMinutes: 100,
-    });
+describe("createScheduler — Fibonacci reset (ADR-0009, days × 1440)", () => {
+  it("restarts the sequence after fibonacciResetDays days; no SMS on the reset minute", () => {
+    // Use a 100-min window so the test stays small but still day-derived: with
+    // tickMs irrelevant here, the window in minutes = days × 1440. Pick days=1
+    // and drive enough ticks; assert the reset bumps the cycle and re-anchors.
+    const store = createStore({ ...CONFIG, fibonacciResetDays: 1 });
     const scheduler = createScheduler(store);
+    const windowMin = 1 * MINUTES_PER_DAY; // 1440
 
-    // Sends at cumulative minutes 1,2,4 (indices 1,2,3) before the reset at m7.
-    for (let i = 0; i < 7; i += 1) scheduler.tick();
+    // Before the window: a full natural sequence fires (1,2,4,7,12,20,...).
+    for (let i = 0; i < windowMin - 1; i += 1) scheduler.tick();
+    expect(store.getFibCycle()).toBe(0);
+    expect(sentSms(store).every((s) => s.fibCycle === 0)).toBe(true);
 
-    const beforeReset = store.snapshot().sms.slice().sort((a, b) => a.seq - b.seq);
-    expect(beforeReset).toHaveLength(3);
-    expect(beforeReset.map((s) => s.fibIndex)).toEqual([1, 2, 3]);
-    expect(beforeReset.every((s) => s.fibCycle === 0)).toBe(true);
-
-    // The reset happened at minute 7; fibCycle bumped, no SMS that minute.
+    // Minute 1440: reset fires (cycle++), and NO SMS is sent that minute.
+    const smsBefore = store.snapshot().sms.length;
+    scheduler.tick(); // minute 1440
     expect(store.getFibCycle()).toBe(1);
+    expect(store.snapshot().sms.length).toBe(smsBefore);
 
-    // Next SMS lands at minute 8 (= 7 + F(1)) with fibIndex 1, fibMinute 1.
-    scheduler.tick(); // minute 8
-    const afterReset = store
-      .snapshot()
-      .sms.slice()
-      .sort((a, b) => a.seq - b.seq);
-    expect(afterReset).toHaveLength(4);
-    const newest = afterReset[afterReset.length - 1]!;
+    // Next SMS lands at minute 1441 (= 1440 + F(1)) with fibIndex 1, cycle 1.
+    scheduler.tick(); // minute 1441
+    const newest = sentSms(store).at(-1)!;
     expect(newest.fibIndex).toBe(1);
     expect(newest.fibMinute).toBe(1);
     expect(newest.fibCycle).toBe(1);
   });
 });
 
-describe("createScheduler — Email reset (ADR-0005)", () => {
-  it("increments emailCycle at emailResetMinutes; the summary that minute carries the new cycle", () => {
-    const store = createStore({
-      tickMs: 60,
-      fibonacciResetMinutes: 100,
-      emailResetMinutes: 5,
-    });
+describe("createScheduler — recomputeFromConfig determinism (ADR-0009)", () => {
+  it("re-anchors the next SMS when the base changes mid-run (increase pushes it out)", () => {
+    const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
+    store.setConfigChangeHandler(() => scheduler.recomputeFromConfig());
 
-    for (let i = 0; i < 4; i += 1) scheduler.tick();
-    expect(store.getEmailCycle()).toBe(0);
+    // Run to minute 2: sends at m1 (idx1) and m2 (idx2); pending gap idx3 (F=2),
+    // anchored at m2 → would naturally fire at m4 (2 + 2×1).
+    scheduler.tick(); // m1
+    scheduler.tick(); // m2
+    expect(sentSms(store)).toHaveLength(2);
 
-    scheduler.tick(); // minute 5 → email reset fires
-    expect(store.getEmailCycle()).toBe(1);
+    // Triple the base. Pending gap idx3 re-derived: anchor(2) + F(3)×3 = 2+6 = 8.
+    store.setRuntimeConfig({ smsBaseIntervalMinutes: 3 });
 
-    const summaries = summaryEmails(store).slice().sort((a, b) => a.seq - b.seq);
-    expect(summaries).toHaveLength(5);
-    // First four belong to cycle 0; the minute-5 summary carries cycle 1.
-    expect(summaries.slice(0, 4).every((e) => e.emailCycle === 0)).toBe(true);
-    expect(summaries[4]!.emailCycle).toBe(1);
+    for (let m = 3; m <= 7; m += 1) scheduler.tick(); // m3..m7 → no send
+    expect(sentSms(store)).toHaveLength(2);
+    scheduler.tick(); // m8 → send idx3 with gap F(3)×3 = 6
+    const sent = sentSms(store);
+    expect(sent).toHaveLength(3);
+    expect(sent[2]!.fibIndex).toBe(3);
+    expect(sent[2]!.fibMinute).toBe(6);
+  });
+
+  it("a base DECREASE that moves the target into the past fires on the very next tick", () => {
+    const store = createStore({ ...CONFIG, smsBaseIntervalMinutes: 5 });
+    const scheduler = createScheduler(store);
+    store.setConfigChangeHandler(() => scheduler.recomputeFromConfig());
+
+    // base 5: first send at m5 (anchor 0 + F(1)×5).
+    for (let m = 1; m <= 4; m += 1) scheduler.tick(); // m1..m4 no send
+    expect(sentSms(store)).toHaveLength(0);
+
+    // Drop base to 1. Pending idx1 re-derived: anchor(0) + F(1)×1 = 1 ≤ 4 (now),
+    // so it is clamped to minuteCount+1 = m5 — the next tick fires it, never
+    // retroactively, never skipped.
+    store.setRuntimeConfig({ smsBaseIntervalMinutes: 1 });
+    scheduler.tick(); // m5 → send idx1
+    const sent = sentSms(store);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.fibIndex).toBe(1);
+    expect(sent[0]!.fibMinute).toBe(1);
+  });
+
+  it("a shrunk reset window already past-due resets immediately on recompute", () => {
+    const store = createStore({ ...CONFIG, fibonacciResetDays: 100 });
+    const scheduler = createScheduler(store);
+    store.setConfigChangeHandler(() => scheduler.recomputeFromConfig());
+
+    for (let i = 0; i < MINUTES_PER_DAY * 2; i += 1) scheduler.tick();
+    expect(store.getFibCycle()).toBe(0); // 2 days ≪ 100-day window
+
+    // Shrink the window to 1 day; 2 days already elapsed ⇒ reset fires NOW.
+    store.setRuntimeConfig({ fibonacciResetDays: 1 });
+    expect(store.getFibCycle()).toBe(1);
+  });
+
+  it("the summary interval is honoured live without any explicit recompute", () => {
+    const store = createStore(CONFIG);
+    const scheduler = createScheduler(store);
+    store.setConfigChangeHandler(() => scheduler.recomputeFromConfig());
+
+    scheduler.tick(); // m1 → summary (interval 1)
+    scheduler.tick(); // m2 → summary
+    expect(summaryEmails(store)).toHaveLength(2);
+
+    store.setRuntimeConfig({ emailSummaryIntervalMinutes: 5 });
+    for (let m = 3; m <= 9; m += 1) scheduler.tick(); // only m5 % 5 == 0
+    expect(summaryEmails(store)).toHaveLength(3); // m1,m2,m5
+    scheduler.tick(); // m10 → m10 % 5 == 0
+    expect(summaryEmails(store)).toHaveLength(4);
   });
 });
 
@@ -174,7 +242,7 @@ describe("createScheduler — start()/stop() single-flight", () => {
     vi.useRealTimers();
   });
 
-  it("start() wires exactly one interval; a second start() is a no-op", () => {
+  it("start() wires exactly one interval (using store.tickMs); a second start() is a no-op", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
     const setIntervalSpy = vi.spyOn(globalThis, "setInterval");

@@ -1,8 +1,9 @@
 /**
- * Wave 2 — the in-memory store: the single stateful module and spine of the
- * mocked server. Holds tasks/emails/sms, a single monotonic `seq`, the two
- * reset-cycle counters, and a pub/sub for SSE deltas. All ordering is by `seq`
- * (ADR-0006); feeds are bounded to the last 200 records (ADR-0006 D7).
+ * Wave 2 / Wave 10 — the in-memory store: the single stateful module and spine
+ * of the mocked server. Holds tasks/emails/sms, a single monotonic `seq`, the
+ * Fibonacci reset-cycle counter, the **mutable runtime config** (ADR-0009), and
+ * a pub/sub for SSE deltas. All ordering is by `seq` (ADR-0006); feeds are
+ * bounded to the last 200 records (ADR-0006 D7).
  *
  * Types & schemas come from `@twofront/domain` — never redefined here.
  */
@@ -18,8 +19,12 @@ import {
   SseEventSchema,
   type SseEvent,
   CreateTaskRequestSchema,
+  RuntimeConfigSchema,
   resolveConfig,
+  toRuntimeConfig,
   type Config,
+  type RuntimeConfig,
+  type PatchConfigRequest,
 } from "@twofront/domain";
 import { NotFoundError, ValidationError } from "./errors";
 
@@ -27,16 +32,32 @@ import { NotFoundError, ValidationError } from "./errors";
 const FEED_CAP = 200;
 
 export interface Store {
-  /** Resolved runtime config — read by the scheduler for `tickMs`/reset windows. */
-  readonly config: Config;
+  /**
+   * The internal/test-only ms-per-minute (ADR-0009). Read by the scheduler to
+   * size its `setInterval`. NOT user-facing and NOT in `snapshot().config`.
+   */
+  readonly tickMs: number;
   addTask(title: string): { task: Task; email: Email };
   completeTask(id: string): { task: Task };
   appendSummaryEmail(): Email;
   appendSms(args: { fibIndex: number; fibMinute: number }): Sms;
   bumpFibCycle(): void;
-  bumpEmailCycle(): void;
   getFibCycle(): number;
-  getEmailCycle(): number;
+  /** The current user-facing runtime cadence config (ADR-0009). */
+  getRuntimeConfig(): RuntimeConfig;
+  /**
+   * Apply a partial runtime-config change (ADR-0009). Clamps/validates via the
+   * domain schema, updates state, notifies the scheduler to recompute, then
+   * broadcasts a `config.updated` SSE frame. Returns the full new config.
+   * Accepts the domain `PatchConfigRequest` (any non-empty subset).
+   */
+  setRuntimeConfig(patch: PatchConfigRequest): RuntimeConfig;
+  /**
+   * Register the scheduler's recompute hook (ADR-0009). Called once when the
+   * scheduler is built; invoked synchronously inside `setRuntimeConfig` BEFORE
+   * the `config.updated` broadcast so the new cadence is already in effect.
+   */
+  setConfigChangeHandler(fn: (cfg: RuntimeConfig) => void): void;
   snapshot(): Snapshot;
   subscribe(fn: (e: SseEvent) => void): () => void;
   /**
@@ -57,10 +78,15 @@ export function createStore(config: Config): Store {
   const sms: Sms[] = [];
   const listeners = new Set<(e: SseEvent) => void>();
 
+  // Mutable runtime config (ADR-0009). `tickMs` is fixed for the process life
+  // (test-only lever); the three user-facing ints mutate via setRuntimeConfig.
+  const tickMs = config.tickMs;
+  let runtime: RuntimeConfig = toRuntimeConfig(config);
+  let onConfigChange: ((cfg: RuntimeConfig) => void) | undefined;
+
   let seq = 0;
   let lastSeq = 0;
   let fibCycle = 0;
-  let emailCycle = 0;
 
   const nextSeq = (): number => {
     seq += 1;
@@ -95,7 +121,7 @@ export function createStore(config: Config): Store {
       : titles.map((t) => `- ${t}`).join("\n");
 
   return {
-    config,
+    tickMs,
     addTask(rawTitle: string): { task: Task; email: Email } {
       const parsed = CreateTaskRequestSchema.safeParse({ title: rawTitle });
       if (!parsed.success) {
@@ -122,7 +148,6 @@ export function createStore(config: Config): Store {
         body: `A new task "${title}" was created.\nUse this email's action link to mark it complete.`,
         taskId: task.id,
         pendingTitles: null,
-        emailCycle,
         createdAt: Date.now(),
       };
       emails.push(email);
@@ -164,7 +189,6 @@ export function createStore(config: Config): Store {
         body: `Pending tasks summary:\n${renderList(titles)}`,
         taskId: null,
         pendingTitles: titles,
-        emailCycle,
         createdAt: Date.now(),
       };
       emails.push(email);
@@ -197,16 +221,30 @@ export function createStore(config: Config): Store {
       fibCycle += 1;
     },
 
-    bumpEmailCycle(): void {
-      emailCycle += 1;
-    },
-
     getFibCycle(): number {
       return fibCycle;
     },
 
-    getEmailCycle(): number {
-      return emailCycle;
+    getRuntimeConfig(): RuntimeConfig {
+      return runtime;
+    },
+
+    setConfigChangeHandler(fn: (cfg: RuntimeConfig) => void): void {
+      onConfigChange = fn;
+    },
+
+    setRuntimeConfig(patch: PatchConfigRequest): RuntimeConfig {
+      // Merge then re-validate the whole config so out-of-range values are
+      // rejected (the route maps the ZodError → 400 bad_request). Zod's parsed
+      // partial omits absent keys (it never sets them to `undefined`), so the
+      // spread cleanly overrides only the provided fields.
+      const next = RuntimeConfigSchema.parse({ ...runtime, ...patch });
+      runtime = next;
+      // Scheduler recomputes synchronously FIRST so the new cadence is already
+      // in effect before any client sees the broadcast (ADR-0009).
+      onConfigChange?.(next);
+      emit({ type: "config.updated", seq: nextSeq(), data: next });
+      return next;
     },
 
     snapshot(): Snapshot {
@@ -218,7 +256,7 @@ export function createStore(config: Config): Store {
         emails: newestFirst(emails),
         sms: newestFirst(sms),
         lastSeq,
-        config,
+        config: runtime,
       };
       SnapshotSchema.parse(snap);
       return snap;

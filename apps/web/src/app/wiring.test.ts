@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_TICK_MS, ConfigSchema } from "@twofront/domain";
+import {
+  DEFAULT_TICK_MS,
+  ConfigSchema,
+  RuntimeConfigSchema,
+} from "@twofront/domain";
 
 // Smoke test: the @twofront/domain workspace dependency resolves from the
 // web app. The real feature tests land in later waves.
@@ -8,12 +12,23 @@ describe("@twofront/domain wiring", () => {
     expect(DEFAULT_TICK_MS).toBe(60_000);
   });
 
-  it("exposes the Config Zod schema", () => {
+  it("exposes the full Config Zod schema (incl. internal tickMs)", () => {
     expect(
       ConfigSchema.safeParse({
         tickMs: 60,
-        fibonacciResetMinutes: 7,
-        emailResetMinutes: 7,
+        emailSummaryIntervalMinutes: 1,
+        smsBaseIntervalMinutes: 1,
+        fibonacciResetDays: 1,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("exposes the user-facing RuntimeConfig schema (no tickMs)", () => {
+    expect(
+      RuntimeConfigSchema.safeParse({
+        emailSummaryIntervalMinutes: 1,
+        smsBaseIntervalMinutes: 1,
+        fibonacciResetDays: 1,
       }).success,
     ).toBe(true);
   });

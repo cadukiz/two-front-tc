@@ -5,6 +5,7 @@ import {
   SmsSchema,
   SnapshotSchema,
   type Config,
+  type RuntimeConfig,
   type SseEvent,
 } from "@twofront/domain";
 import { createStore, getStore } from "./store";
@@ -12,8 +13,15 @@ import { NotFoundError, ValidationError } from "./errors";
 
 const CONFIG: Config = {
   tickMs: 60,
-  fibonacciResetMinutes: 7,
-  emailResetMinutes: 7,
+  emailSummaryIntervalMinutes: 1,
+  smsBaseIntervalMinutes: 1,
+  fibonacciResetDays: 7,
+};
+
+const RUNTIME: RuntimeConfig = {
+  emailSummaryIntervalMinutes: 1,
+  smsBaseIntervalMinutes: 1,
+  fibonacciResetDays: 7,
 };
 
 describe("createStore — addTask", () => {
@@ -32,7 +40,7 @@ describe("createStore — addTask", () => {
     expect(email.kind).toBe("immediate");
     expect(email.taskId).toBe(task.id);
     expect(email.pendingTitles).toBeNull();
-    expect(email.emailCycle).toBe(0);
+    expect("emailCycle" in email).toBe(false);
     expect(email.subject).toContain("Buy milk");
     expect(email.body).toContain("Buy milk");
     // immediate email seq is strictly after the task seq
@@ -136,22 +144,74 @@ describe("createStore — appendSms", () => {
   });
 });
 
-describe("createStore — cycle control", () => {
-  it("bumpFibCycle / bumpEmailCycle advance the counters", () => {
+describe("createStore — fib cycle control", () => {
+  it("bumpFibCycle advances the counter and stamps later SMS", () => {
     const store = createStore(CONFIG);
     expect(store.getFibCycle()).toBe(0);
-    expect(store.getEmailCycle()).toBe(0);
     store.bumpFibCycle();
-    store.bumpEmailCycle();
-    store.bumpEmailCycle();
     expect(store.getFibCycle()).toBe(1);
-    expect(store.getEmailCycle()).toBe(2);
 
     store.addTask("x");
     const sms = store.appendSms({ fibIndex: 1, fibMinute: 1 });
-    const email = store.appendSummaryEmail();
     expect(sms.fibCycle).toBe(1);
-    expect(email.emailCycle).toBe(2);
+  });
+});
+
+describe("createStore — runtime config (ADR-0009)", () => {
+  it("snapshot().config is the three user-facing ints (no tickMs)", () => {
+    const store = createStore(CONFIG);
+    const snap = store.snapshot();
+    expect(snap.config).toEqual(RUNTIME);
+    expect("tickMs" in snap.config).toBe(false);
+  });
+
+  it("getRuntimeConfig returns the live config; tickMs is exposed separately", () => {
+    const store = createStore(CONFIG);
+    expect(store.getRuntimeConfig()).toEqual(RUNTIME);
+    expect(store.tickMs).toBe(60);
+  });
+
+  it("setRuntimeConfig clamps via schema, updates state, and returns the full new config", () => {
+    const store = createStore(CONFIG);
+    const next = store.setRuntimeConfig({ smsBaseIntervalMinutes: 5 });
+    expect(next).toEqual({ ...RUNTIME, smsBaseIntervalMinutes: 5 });
+    expect(store.getRuntimeConfig().smsBaseIntervalMinutes).toBe(5);
+    expect(store.snapshot().config.smsBaseIntervalMinutes).toBe(5);
+  });
+
+  it("setRuntimeConfig rejects out-of-range values (throws ZodError)", () => {
+    const store = createStore(CONFIG);
+    expect(() => store.setRuntimeConfig({ fibonacciResetDays: 0 })).toThrow();
+    expect(() =>
+      store.setRuntimeConfig({ emailSummaryIntervalMinutes: 101 }),
+    ).toThrow();
+    // State unchanged after a rejected patch.
+    expect(store.getRuntimeConfig()).toEqual(RUNTIME);
+  });
+
+  it("setRuntimeConfig emits a config.updated SSE frame carrying the new config", () => {
+    const store = createStore(CONFIG);
+    const events: SseEvent[] = [];
+    store.subscribe((e) => events.push(e));
+    store.setRuntimeConfig({ fibonacciResetDays: 9 });
+    const cfgEvents = events.filter((e) => e.type === "config.updated");
+    expect(cfgEvents).toHaveLength(1);
+    const evt = cfgEvents[0]!;
+    if (evt.type === "config.updated") {
+      expect(evt.data).toEqual({ ...RUNTIME, fibonacciResetDays: 9 });
+      expect(evt.seq).toBeGreaterThan(0);
+    }
+  });
+
+  it("invokes the registered config-change handler BEFORE broadcasting", () => {
+    const store = createStore(CONFIG);
+    const order: string[] = [];
+    store.setConfigChangeHandler(() => order.push("recompute"));
+    store.subscribe((e) => {
+      if (e.type === "config.updated") order.push("broadcast");
+    });
+    store.setRuntimeConfig({ emailSummaryIntervalMinutes: 4 });
+    expect(order).toEqual(["recompute", "broadcast"]);
   });
 });
 
@@ -162,7 +222,7 @@ describe("createStore — snapshot", () => {
     store.addTask("Second");
     const snap = store.snapshot();
     expect(SnapshotSchema.safeParse(snap).success).toBe(true);
-    expect(snap.config).toEqual(CONFIG);
+    expect(snap.config).toEqual(RUNTIME);
     // newest-first by seq
     for (let i = 1; i < snap.tasks.length; i += 1) {
       expect(snap.tasks[i - 1]!.seq).toBeGreaterThan(snap.tasks[i]!.seq);
@@ -235,10 +295,11 @@ describe("getStore — singleton", () => {
   beforeEach(() => {
     // ensure a clean global between assertions in this block
     delete (globalThis as { __twofront?: unknown }).__twofront;
-    // getStore() resolves config from process.env; provide the required
-    // reset windows so resolveConfig validates without touching real env.
-    process.env.FIBONACCI_RESET_MINUTES = "7";
-    process.env.EMAIL_RESET_MINUTES = "7";
+    // getStore() resolves config from process.env; with ADR-0009 every value
+    // defaults, so resolveConfig works even with no env set.
+    delete process.env.EMAIL_SUMMARY_INTERVAL_MINUTES;
+    delete process.env.SMS_BASE_INTERVAL_MINUTES;
+    delete process.env.FIBONACCI_RESET_DAYS;
   });
 
   it("returns the same instance across calls", () => {

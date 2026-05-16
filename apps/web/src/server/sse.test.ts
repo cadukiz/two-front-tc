@@ -10,8 +10,9 @@ import { openSseStream, formatSseFrame } from "./sse";
 
 const CONFIG: Config = {
   tickMs: 60,
-  fibonacciResetMinutes: 100,
-  emailResetMinutes: 100,
+  emailSummaryIntervalMinutes: 1,
+  smsBaseIntervalMinutes: 1,
+  fibonacciResetDays: 100,
 };
 
 /** Read and decode the next chunk from a stream reader. */
@@ -25,10 +26,11 @@ async function nextChunk(
 
 beforeEach(() => {
   // openSseStream() → ensureSchedulerStarted() → getStore() → resolveConfig
-  // reads process.env. Provide the required reset windows so it validates
-  // without touching real env (mirrors store.test.ts).
-  process.env.FIBONACCI_RESET_MINUTES = "100";
-  process.env.EMAIL_RESET_MINUTES = "100";
+  // reads process.env. ADR-0009: every value defaults, so clearing the new
+  // vars keeps these tests isolated from any ambient env.
+  delete process.env.EMAIL_SUMMARY_INTERVAL_MINUTES;
+  delete process.env.SMS_BASE_INTERVAL_MINUTES;
+  delete process.env.FIBONACCI_RESET_DAYS;
 });
 
 afterEach(() => {
