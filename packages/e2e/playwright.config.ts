@@ -15,32 +15,34 @@ import { defineConfig, devices } from "@playwright/test";
  * the app under a compressed time model so the 1-minute summary-email cadence
  * and the Fibonacci SMS gaps are observable in E2E (ADR-0004).
  *
- * Time-model tuning (Wave 7 — determinism, NOT assertion-weakening):
- *  - `TICK_MS=1000` (was 60). One simulated minute = 1 s. Root cause that
- *    drove this: the scheduler is a real `setInterval(tick, TICK_MS)` and a
- *    *summary email fires every simulated minute*. At 60 ms that is ~17
- *    `email.created` SSE frames/s; the client `liveReducer.upsert` re-sorts
- *    the whole (≤200-cap) emails feed and React re-renders every expandable
- *    `EmailCard` on each frame. Under the Next production server + headless
- *    Chromium that render churn progressively starved the page until even
- *    trivial locator queries timed out → intermittent failures (observed at
- *    60 ms AND at 200 ms = ~5 frames/s). 1000 ms cuts the dominant flood to
- *    ~1 frame/s — the page stays responsive for the whole run. The schedule
- *    is still fully observed: SMS land at cumulative sim-minutes 1,2,4,7,12
- *    → 1/2/4/7/12 s; the first summary email ≈ 1 s.
- *  - `FIBONACCI_RESET_MINUTES=20` / `EMAIL_RESET_MINUTES=20` (were 7). 20 ≥
- *    the 5th Fibonacci gap-sum (12) so a full natural sequence 1,2,4,7,12
- *    fires *before* the reset minute (20) restarts it — the reset/`fibCycle`
- *    is still reached and observable (ADR-0005), but the SMS rate is never
- *    starved to <3 sends while the task is pending. The task is necessarily
- *    added a few sim-minutes after the scheduler starts (it starts on the
- *    first SSE connect during page load), so the title-bearing reminders the
- *    spec asserts are the later sends in this/next cycle.
+ * Time-model tuning (Wave 7/10 — determinism, NOT assertion-weakening):
+ *  - `TICK_MS=1000` (internal/test-only ms-per-minute, ADR-0009). One minute
+ *    = 1 s. Root cause that drove this: the scheduler is a real
+ *    `setInterval(tick, TICK_MS)` and a *summary email fires every minute* (at
+ *    `EMAIL_SUMMARY_INTERVAL_MINUTES=1`). At 60 ms that is ~17 `email.created`
+ *    SSE frames/s; the client `liveReducer.upsert` re-sorts the whole
+ *    (≤200-cap) emails feed and React re-renders every expandable `EmailCard`
+ *    on each frame. Under the Next production server + headless Chromium that
+ *    render churn progressively starved the page until even trivial locator
+ *    queries timed out → intermittent failures (observed at 60 ms AND at
+ *    200 ms = ~5 frames/s). 1000 ms cuts the dominant flood to ~1 frame/s —
+ *    the page stays responsive for the whole run. The schedule is still fully
+ *    observed: SMS land at cumulative minutes 1,2,4,7,12 → 1/2/4/7/12 s; the
+ *    first summary email ≈ 1 s.
+ *  - `EMAIL_SUMMARY_INTERVAL_MINUTES=1` / `SMS_BASE_INTERVAL_MINUTES=1`
+ *    (ADR-0009 defaults) → the cadence is *identical* to the pre-Wave-10
+ *    behaviour the Wave-7 specs were written against: summary every minute,
+ *    SMS gaps 1,1,2,3,5,8…. Only the contract rename forced this change.
+ *  - `FIBONACCI_RESET_DAYS=1` (ADR-0009; 1 day = 1440 minutes ⇒ a reset at
+ *    1440 s here). That is FAR beyond the whole-suite horizon (≈30 s), so the
+ *    natural Fibonacci sequence runs uninterrupted with no reset — exactly
+ *    what the specs assert (immediate→summary→≥3 Fibonacci SMS + B2 round-trip,
+ *    NOT a reset). The reset path keeps its own deterministic unit coverage.
  *  - Assertions are UNCHANGED and strict (see specs): the budgets are wide
  *    web-first timeouts derived from the model — no hard sleeps, no weakened
  *    checks. Whole suite ≈ 30–40 s, comfortably deterministic.
  * Next.js does not override already-set process env, so these `webServer.env`
- * values win over `apps/web/.env` (ADR-0004 note).
+ * values win over `apps/web/.env` (ADR-0009 note).
  */
 export default defineConfig({
   testDir: "tests",
@@ -69,10 +71,11 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
-      // See the time-model tuning note above (Wave 7 determinism).
+      // See the time-model tuning note above (Wave 7/10 determinism, ADR-0009).
       TICK_MS: "1000",
-      FIBONACCI_RESET_MINUTES: "20",
-      EMAIL_RESET_MINUTES: "20",
+      EMAIL_SUMMARY_INTERVAL_MINUTES: "1",
+      SMS_BASE_INTERVAL_MINUTES: "1",
+      FIBONACCI_RESET_DAYS: "1",
     },
   },
 });
