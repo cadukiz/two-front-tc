@@ -8,16 +8,14 @@ import { EmailsPage } from "../pages/EmailsPage";
  *
  * Proves the email action drives domain state via the GET email-link adapter
  * (`GET /api/tasks/:id/complete`, the exact path a mail client would open),
- * and that the result reflects back through SSE into BOTH panels:
- *   add task → in the Emails panel, expand its immediate email → click
- *   "Mark complete" → the task moves Pending → Completed in the Tasks panel
- *   AND the email's action flips from "Mark complete" to the disabled
- *   "Completed" state.
+ * that the action is reachable WITHOUT expanding the card (RC1 fix, ADR-0010),
+ * that **every** notification email is actionable (RC2: both `immediate` and
+ * `summary`), and that the result reflects back through SSE into BOTH panels.
  *
- * If the GET adapter, the idempotent completion, or the SSE reflection broke,
- * this test fails (it never POSTs and never optimistically mutates the UI).
+ * The tests never POST and never optimistically mutate the UI — if the GET
+ * adapter, the idempotent completion, or the SSE reflection broke, they fail.
  */
-test("B2: completing a task from its immediate email round-trips through SSE", async ({
+test("B2 (immediate): complete from the immediate email round-trips through SSE — no expand", async ({
   page,
 }) => {
   const app = new AppPage(page);
@@ -33,9 +31,12 @@ test("B2: completing a task from its immediate email round-trips through SSE", a
   await expect(tasks.pendingTask(TITLE)).toBeVisible({ timeout: 10_000 });
   await expect(tasks.completedTask(TITLE)).toHaveCount(0);
 
-  // Drive the email action (expands the immediate card, clicks "Mark
-  // complete" → fires the GET email-link adapter).
+  // RC1: the immediate card's "Mark complete" is visible WITHOUT expanding;
+  // the card header stays collapsed (aria-expanded=false) the whole time.
+  const header = emails.immediateFor(TITLE).first().getByRole("button").first();
+  await expect(header).toHaveAttribute("aria-expanded", "false");
   await emails.clickMarkCompleteOn(TITLE);
+  await expect(header).toHaveAttribute("aria-expanded", "false");
 
   // The completion reflects back via SSE: the task leaves Pending and lands
   // in Completed (server-authoritative — no optimistic UI mutation).
@@ -44,9 +45,47 @@ test("B2: completing a task from its immediate email round-trips through SSE", a
   expect(await tasks.completedTitles()).toContain(TITLE);
   expect(await tasks.pendingTitles()).not.toContain(TITLE);
 
-  // The email's action flips to its done/disabled state ("Completed"),
-  // driven by the same SSE `task.completed` frame (`taskStillPending`→false).
+  // The immediate email's action flips to its done/disabled state, driven by
+  // the same SSE `task.completed` frame (the id leaves `pendingTaskIds`).
   const doneBtn = emails.completedActionFor(TITLE);
   await expect(doneBtn).toBeVisible({ timeout: 10_000 });
   await expect(doneBtn).toBeDisabled();
+});
+
+test("B2 (summary): a summary email exposes a per-task 'Mark complete' that round-trips through SSE — no expand", async ({
+  page,
+}) => {
+  const app = new AppPage(page);
+  const tasks = new TasksPage(app);
+  const emails = new EmailsPage(app);
+
+  await app.goto();
+
+  const TITLE = "E2E summary round trip";
+  await tasks.addTask(TITLE);
+  await expect(tasks.pendingTask(TITLE)).toBeVisible({ timeout: 10_000 });
+
+  // A summary email fires every minute (compressed TICK_MS). Wait for one that
+  // lists this still-pending task: its per-task "Mark complete" control is
+  // visible WITHOUT expanding the card (RC1).
+  const summaryAction = emails.summaryMarkCompleteFor(TITLE);
+  await expect(summaryAction).toBeVisible({ timeout: 20_000 });
+  const summaryHeader = emails.anySummary().getByRole("button").first();
+  await expect(summaryHeader).toHaveAttribute("aria-expanded", "false");
+
+  // Drive the per-task email-link adapter from the summary email itself.
+  await summaryAction.click();
+  await expect(summaryHeader).toHaveAttribute("aria-expanded", "false");
+
+  // The completion reflects back via SSE into the Tasks panel.
+  await expect(tasks.completedTask(TITLE)).toBeVisible({ timeout: 15_000 });
+  await expect(tasks.pendingTask(TITLE)).toHaveCount(0);
+  expect(await tasks.completedTitles()).toContain(TITLE);
+
+  // And the round-trip is visibly validated on a summary email: the newest
+  // summary either no longer lists the now-completed task, or shows it in the
+  // disabled "Completed" state — never as an active "Mark complete" again.
+  await expect(emails.summaryMarkCompleteFor(TITLE)).toHaveCount(0, {
+    timeout: 15_000,
+  });
 });

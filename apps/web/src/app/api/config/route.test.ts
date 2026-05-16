@@ -112,7 +112,7 @@ describe("PATCH /api/config — rejection (400 bad_request)", () => {
     expect(ApiErrorSchema.parse(await res.json()).code).toBe("bad_request");
   });
 
-  it("rejects an out-of-range value (clamp/reject)", async () => {
+  it("rejects an out-of-range value (reject)", async () => {
     for (const bad of [{ fibonacciResetDays: 0 }, { smsBaseIntervalMinutes: 101 }, { emailSummaryIntervalMinutes: 2.5 }]) {
       const res = await PATCH(patchReq(JSON.stringify(bad)));
       expect(res.status).toBe(400);

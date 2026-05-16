@@ -3,7 +3,7 @@ import { expect } from "@playwright/test";
 import { AppPage } from "./AppPage";
 
 /**
- * Emails panel page object.
+ * Emails panel page object (Wave 11 / ADR-0010).
  *
  * DOM facts (from `EmailCard`):
  *  - Each email is an `<article>` whose header is a toggle `button`
@@ -11,8 +11,12 @@ import { AppPage } from "./AppPage";
  *    and the subject text.
  *  - Immediate subject = `New task: "<title>"`; Summary subject =
  *    `Pending tasks summary`.
- *  - The body + the "Mark complete" / "Completed" action are only mounted
- *    while the card is expanded, so we must expand before driving the action.
+ *  - RC1 fix: the complete action is rendered in the ALWAYS-VISIBLE
+ *    (collapsed) layout — NO expand is required to find or click it. Each
+ *    control is a `button` with `aria-label="Mark complete: <label>"` (or the
+ *    disabled `aria-label="Completed: <label>"` once its task is done).
+ *  - `immediate` → one control whose label is the email subject. `summary` →
+ *    one control per pending entry whose label is that task's title.
  */
 export class EmailsPage {
   readonly page: Page;
@@ -69,21 +73,21 @@ export class EmailsPage {
       .first();
   }
 
-  /** Expand a card's header so its body/action mounts. */
-  private async expand(article: Locator): Promise<void> {
-    const header = article.getByRole("button").first();
-    if ((await header.getAttribute("aria-expanded")) !== "true") {
-      await header.click();
-      await expect(header).toHaveAttribute("aria-expanded", "true");
-    }
+  /**
+   * The active "Mark complete" control inside the immediate card for `title`
+   * (label = the email subject `New task: "<title>"`). Visible WITHOUT expand.
+   */
+  markCompleteOnImmediate(title: string): Locator {
+    return this.immediateFor(title)
+      .first()
+      .getByRole("button", { name: `Mark complete: New task: "${title}"` });
   }
 
-  /** Expand the immediate email for `title` and click its "Mark complete". */
+  /** Expand the immediate card is NOT required — click its action directly. */
   async clickMarkCompleteOn(title: string): Promise<void> {
     const article = this.immediateFor(title).first();
     await expect(article).toBeVisible({ timeout: 15_000 });
-    await this.expand(article);
-    const btn = article.getByRole("button", { name: "Mark complete" });
+    const btn = this.markCompleteOnImmediate(title);
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await btn.click();
   }
@@ -92,7 +96,24 @@ export class EmailsPage {
   completedActionFor(title: string): Locator {
     return this.immediateFor(title)
       .first()
-      .getByRole("button", { name: "Completed" });
+      .getByRole("button", { name: `Completed: New task: "${title}"` });
+  }
+
+  /**
+   * A per-task "Mark complete" control inside ANY summary email for the task
+   * titled `title` (label = the task title). Visible WITHOUT expand.
+   */
+  summaryMarkCompleteFor(title: string): Locator {
+    return this.anySummary().getByRole("button", {
+      name: `Mark complete: ${title}`,
+    });
+  }
+
+  /** The done/disabled per-task control for `title` in ANY summary email. */
+  summaryCompletedFor(title: string): Locator {
+    return this.anySummary().getByRole("button", {
+      name: `Completed: ${title}`,
+    });
   }
 
   /** Filter helper — click one of the All/Immediate/Summary tabs. */

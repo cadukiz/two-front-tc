@@ -8,8 +8,8 @@
  *
  * Three integer sliders bound to the live, server-authoritative `RuntimeConfig`:
  *  - Email summary every — 1–100 min
- *  - SMS pace (Fibonacci base) — 1–100 min
- *  - Reset Fibonacci pace after — 1–100 days
+ *  - SMS · Fibonacci pace base — 1–100 min
+ *  - SMS · reset Fibonacci pace after — 1–100 days
  *
  * Each slider is optimistic locally and debounced (~300 ms) → `onPatch` (a
  * single-field `PATCH /api/config`). The server broadcasts `config.updated`
