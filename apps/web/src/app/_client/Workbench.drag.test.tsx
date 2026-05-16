@@ -82,7 +82,7 @@ const email = (id: string, seq: number, subject: string): Email => ({
   subject,
   body: "b",
   taskId: null,
-  pendingTitles: [],
+  pending: [],
   createdAt: 0,
 });
 

@@ -416,9 +416,7 @@ export function Workbench({ initial }: WorkbenchProps) {
                     key={e.id}
                     email={e}
                     fresh={freshEmails.has(e.id)}
-                    taskStillPending={
-                      e.taskId != null && pendingIds.has(e.taskId)
-                    }
+                    pendingTaskIds={pendingIds}
                     onError={pushToast}
                   />
                 ))

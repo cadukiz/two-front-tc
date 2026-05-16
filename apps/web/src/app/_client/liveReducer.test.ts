@@ -17,7 +17,7 @@ const email = (over: Partial<Email> & Pick<Email, "id" | "seq">): Email => ({
   subject: "s",
   body: "b",
   taskId: null,
-  pendingTitles: [],
+  pending: [],
   createdAt: 0,
   ...over,
 });

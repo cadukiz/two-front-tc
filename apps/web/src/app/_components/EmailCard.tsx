@@ -3,15 +3,23 @@
 /**
  * `EmailCard` — ported `.jsx → .tsx`, Tailwind-only (ADR-0007). Domain `Email`
  * type from `@twofront/domain`; field map applied: design `items` →
- * `pendingTitles`, `timestamp` → `createdAt`, `headline` → `body`.
+ * `email.pending` (`{id,title}[]`), `timestamp` → `createdAt`,
+ * `headline` → `body`.
  *
- * B2 round-trip (brief / ADR-0002): for an `immediate` email whose referenced
- * task (`email.taskId`) is still pending, render a "Mark complete" action that
- * hits the **GET email-link adapter** `GET /api/tasks/${taskId}/complete` —
- * the exact path a real mail client would open. We deliberately do NOT
- * optimistically mutate: the completion reflects back through SSE
- * (server-authoritative); once the task is completed `taskStillPending`
- * becomes false and the action shows the done/disabled state.
+ * B2 / ADR-0010 — **every** notification email is actionable, and the complete
+ * action is visible WITHOUT expanding the card (matches the always-visible
+ * `TaskRow` Complete pattern):
+ *  - RC1: the complete affordance lives in the always-rendered (collapsed)
+ *    layout. Expanding only reveals the body/detail — completing never
+ *    requires an expand.
+ *  - RC2: `immediate` → one "Mark complete" for `email.taskId`; `summary` →
+ *    one per-entry control for EACH still-pending `email.pending` task. Each
+ *    control hits the **GET email-link adapter** `GET /api/tasks/:id/complete`
+ *    (the exact path a real mail client would open). We deliberately do NOT
+ *    optimistically mutate: completion reflects back through SSE
+ *    (server-authoritative) via the live `pendingTaskIds` prop — a control
+ *    flips to the done/disabled "Completed" state only once its task leaves
+ *    the pending set, so the round-trip is visibly validated.
  */
 import { useState } from "react";
 import type { Email } from "@twofront/domain";
@@ -22,8 +30,12 @@ interface EmailCardProps {
   email: Email;
   /** Arrival-highlight flag (Tailwind `animate-fresh`). */
   fresh: boolean;
-  /** Derived in `Workbench` from the live tasks: is `email.taskId` pending? */
-  taskStillPending: boolean;
+  /**
+   * Live, server-authoritative set of currently-pending task ids (derived in
+   * `Workbench` from the live tasks). Drives every per-task done/pending state
+   * — immediate (`email.taskId`) and each summary `email.pending` entry.
+   */
+  pendingTaskIds: ReadonlySet<string>;
   /** Surface an error toast if the GET round-trip fails. */
   onError: (message: string) => void;
 }
@@ -31,16 +43,15 @@ interface EmailCardProps {
 export function EmailCard({
   email,
   fresh,
-  taskStillPending,
+  pendingTaskIds,
   onError,
 }: EmailCardProps) {
   const [open, setOpen] = useState<boolean>(false);
-  const [marking, setMarking] = useState<boolean>(false);
+  const [markingId, setMarkingId] = useState<string | null>(null);
   const isImmediate = email.kind === "immediate";
-  const showAction = isImmediate && email.taskId != null;
 
   const markComplete = async (taskId: string): Promise<void> => {
-    setMarking(true);
+    setMarkingId(taskId);
     try {
       // The exact email-action link path (GET adapter) — not the POST API.
       const res = await fetch(`/api/tasks/${taskId}/complete`, {
@@ -49,12 +60,49 @@ export function EmailCard({
       if (!res.ok) {
         onError("Could not complete task from email — server rejected it.");
       }
-      // Success reflects back via SSE → `taskStillPending` flips to false.
+      // Success reflects back via SSE → the id leaves `pendingTaskIds`.
     } catch {
       onError("Could not complete task from email — connection problem.");
     } finally {
-      setMarking(false);
+      setMarkingId(null);
     }
+  };
+
+  /** One complete affordance for a single task (shared immediate + summary). */
+  const TaskAction = ({
+    taskId,
+    label,
+  }: {
+    taskId: string;
+    label: string;
+  }): React.ReactElement => {
+    const stillPending = pendingTaskIds.has(taskId);
+    if (!stillPending) {
+      return (
+        <button
+          type="button"
+          disabled
+          aria-label={`Completed: ${label}`}
+          className="inline-flex flex-none cursor-default items-center gap-[6px] rounded-pill border border-[rgba(15,93,74,0.2)] bg-teal-50 px-3 py-[5px] text-[12px] font-medium text-teal [&_svg]:h-3 [&_svg]:w-3"
+        >
+          <ICheck /> Completed
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        disabled={markingId === taskId}
+        aria-label={`Mark complete: ${label}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          void markComplete(taskId);
+        }}
+        className="inline-flex flex-none items-center gap-[6px] rounded-pill border border-teal bg-transparent px-3 py-[5px] text-[12px] font-medium text-teal transition-all duration-150 hover:bg-teal hover:text-panel disabled:cursor-not-allowed disabled:opacity-70 motion-reduce:transition-none [&_svg]:h-3 [&_svg]:w-3"
+      >
+        <ICheck /> Mark complete
+      </button>
+    );
   };
 
   return (
@@ -100,6 +148,41 @@ export function EmailCard({
         </span>
       </button>
 
+      {/* ALWAYS-VISIBLE action region (RC1): completing never requires an
+          expand. `immediate` → one control for `email.taskId`; `summary` →
+          one compact `{title} [Mark complete]` row per pending entry; empty
+          summary → the "no pending tasks" empty state. */}
+      <div className="border-t border-dashed border-line-soft px-[14px] py-[10px]">
+        {isImmediate && email.taskId != null ? (
+          <div className="flex items-center justify-end">
+            <TaskAction taskId={email.taskId} label={email.subject} />
+          </div>
+        ) : !isImmediate && email.pending != null ? (
+          email.pending.length > 0 ? (
+            <ul
+              className="flex list-none flex-col gap-[6px] p-0"
+              aria-label="Pending tasks in this summary"
+            >
+              {email.pending.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span className="min-w-0 truncate text-[13px] text-ink-2">
+                    {p.title}
+                  </span>
+                  <TaskAction taskId={p.id} label={p.title} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="text-[12.5px] italic text-ink-3">
+              No pending tasks at this time.
+            </span>
+          )
+        ) : null}
+      </div>
+
       {open && (
         <div className="border-t border-dashed border-line-soft px-[14px] pb-[14px] pt-3">
           <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-3">
@@ -111,59 +194,9 @@ export function EmailCard({
             </span>
           </div>
 
-          <div className="mt-2 text-[13.5px] leading-[1.5] text-ink-2">
-            {isImmediate ? (
-              <span>{email.body}</span>
-            ) : email.pendingTitles && email.pendingTitles.length > 0 ? (
-              <ul className="mt-[6px] flex list-none flex-col gap-[3px] p-0">
-                {email.pendingTitles.slice(0, 5).map((t, i) => (
-                  <li
-                    key={i}
-                    className="relative pl-[14px] text-[13px] text-ink-2 before:absolute before:left-0 before:top-[0.6em] before:h-px before:w-[6px] before:bg-tan-deep before:content-['']"
-                  >
-                    {t}
-                  </li>
-                ))}
-                {email.pendingTitles.length > 5 && (
-                  <li className="relative pl-[14px] text-[13px] italic text-ink-3">
-                    &hellip;and {email.pendingTitles.length - 5} more
-                  </li>
-                )}
-              </ul>
-            ) : (
-              <span className="italic text-ink-3">
-                No pending tasks at this time.
-              </span>
-            )}
+          <div className="mt-2 whitespace-pre-line text-[13.5px] leading-[1.5] text-ink-2">
+            {email.body}
           </div>
-
-          {showAction && email.taskId != null && (
-            <div className="mt-3 flex gap-2">
-              {taskStillPending ? (
-                <button
-                  type="button"
-                  disabled={marking}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (email.taskId != null) {
-                      void markComplete(email.taskId);
-                    }
-                  }}
-                  className="inline-flex items-center gap-[6px] rounded-pill border border-teal bg-transparent px-3 py-[6px] text-[12.5px] font-medium text-teal transition-all duration-150 hover:bg-teal hover:text-panel disabled:cursor-not-allowed disabled:opacity-70 motion-reduce:transition-none [&_svg]:h-3 [&_svg]:w-3"
-                >
-                  <ICheck /> Mark complete
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  className="inline-flex cursor-default items-center gap-[6px] rounded-pill border border-[rgba(15,93,74,0.2)] bg-teal-50 px-3 py-[6px] text-[12.5px] font-medium text-teal [&_svg]:h-3 [&_svg]:w-3"
-                >
-                  <ICheck /> Completed
-                </button>
-              )}
-            </div>
-          )}
         </div>
       )}
     </article>

@@ -56,7 +56,7 @@ const validResponse = {
     subject: "New task added — Buy milk",
     body: "A new task was just added.",
     taskId: "11111111-1111-1111-1111-111111111111",
-    pendingTitles: null,
+    pending: null,
     createdAt: 1_700_000_000_000,
   },
 };
