@@ -195,3 +195,13 @@
 **Decision (user-specified spec):** introduce `Splitter` with **one sanctioned `style={{ gridTemplateColumns/Rows }}` inline-style exception** to ADR-0007. This is the standard Tailwind-recommended pattern for runtime-computed values; **every *visible* style remains a Tailwind utility** (handles, cursors, hover/active affordances, the `min-h-0 min-w-0` chain, per-panel `flex-col min-h-0 overflow-hidden` + `flex-none` header + `flex-1 min-h-0 overflow-y-auto` body). App shell becomes `h-screen overflow-hidden`; layout never overflows — panels scroll internally.
 
 **Rationale:** ADR-0007's intent is "no bespoke CSS files / styled-components / CSS modules / design-token CSS vars" — not "never use React `style` for a genuinely dynamic, non-themeable value." A single computed grid-track string is the textbook exception and is explicitly scoped/documented so the Tailwind-only guarantee stays verifiable (still exactly one CSS file; no `styled`/module/`<style>`). **Trade-off accepted:** one documented inline `style` for runtime grid tracks vs. an impossible-in-pure-Tailwind requirement; net capability gain (arbitrary nested resizable layout) at zero bespoke-CSS cost.
+
+---
+
+## ADR-0014 — Pomodoro fully decoupled (no mute); purely a guidance timer
+
+**Context:** ADR-0008 kept Pomodoro as a *non-authoritative render-mute* (suppress arrival highlights/toasts while focused); ADR-0012 preserved that. On final review the user decided Pomodoro must **not impact anything** — "it will only be there to guide something."
+
+**Decision (user):** Remove the render-mute entirely. Pomodoro becomes a **standalone local countdown** with **zero outward effect**: no `muted` state, no `EMPTY_FRESH` swap, no emptied `Toasts`, no "Focus mode" banner — feeds, arrival highlights, and toasts always behave normally regardless of Pomodoro. Also a UX trim: smaller countdown ring; remove the descriptive sub-text under the times. Supersedes the Pomodoro clauses of ADR-0008 / ADR-0012.
+
+**Trade-off accepted:** loses the "focus mute" nicety, but removes all coupling between a cosmetic widget and core rendering — strictly simpler, zero risk of the optional extra interfering with the brief's behavior. The render-mute regression test (ADR-0012) is now obsolete and is removed (no behavior to guard since there is no coupling at all). Net reduction in surface area.
