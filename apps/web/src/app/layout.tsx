@@ -48,7 +48,13 @@ export default function RootLayout({
       lang="en"
       className={`${sans.variable} ${serif.variable} ${mono.variable}`}
     >
-      <body>{children}</body>
+      {/*
+        ADR-0013 rule 1 — the app shell NEVER scrolls. `h-screen
+        overflow-hidden` pins the body to the viewport so the resizable
+        Splitter layout fills it exactly and panels scroll INTERNALLY
+        (no page-level overflow at any nesting depth).
+      */}
+      <body className="h-screen overflow-hidden">{children}</body>
     </html>
   );
 }

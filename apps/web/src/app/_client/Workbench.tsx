@@ -45,6 +45,7 @@ import {
 } from "./pendingOrder";
 import { Toasts } from "../_components/Toasts";
 import type { Toast } from "../_components/Toasts";
+import { Splitter } from "../_components/Splitter";
 
 const EMPTY_FRESH: ReadonlySet<string> = new Set<string>();
 
@@ -233,13 +234,12 @@ export function Workbench({ initial }: WorkbenchProps) {
       ? emails
       : emails.filter((e) => e.kind === emailFilter);
 
-  return (
-    <div className="flex h-screen min-h-0 flex-col">
-      <AppHeader connection={connection} now={now} />
-
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-[18px] px-[22px] pb-[22px] pt-[18px] max-[920px]:grid-cols-1 max-[920px]:auto-rows-[minmax(400px,auto)] max-[720px]:gap-[14px] max-[720px]:p-[14px]">
-        {/* ---------------- Tasks ---------------- */}
-        <Panel
+  // ---- Wave 13 (ADR-0013): each panel's content is built once here, then
+  // composed BOTH into the desktop resizable `Splitter` tree and the
+  // narrow-screen stacked fallback. Content/props/behaviour are byte-identical
+  // between the two arrangements — only the *containment/layout* differs.
+  const tasksPanel = (
+    <Panel
           kind="tasks"
           title="My Tasks"
           count={pending.length}
@@ -329,10 +329,9 @@ export function Workbench({ initial }: WorkbenchProps) {
             )}
           </div>
         </Panel>
+  );
 
-        {/* ---------------- Right stack ---------------- */}
-        <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-[18px] max-[720px]:gap-[14px]">
-          {/* Emails */}
+  const emailsPanel = (
           <Panel
             kind="emails"
             title="Emails"
@@ -432,9 +431,9 @@ export function Workbench({ initial }: WorkbenchProps) {
               )}
             </div>
           </Panel>
+  );
 
-          {/* SMS + controls split (SMS left; Time-controls right) */}
-          <div className="grid min-h-0 grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-[18px] max-[920px]:grid-cols-1 max-[920px]:auto-rows-[minmax(280px,auto)] max-[720px]:gap-[14px]">
+  const smsPanel = (
             <Panel
               kind="sms"
               title="SMS"
@@ -473,9 +472,9 @@ export function Workbench({ initial }: WorkbenchProps) {
                 )}
               </div>
             </Panel>
+  );
 
-            {/* Controls column */}
-            <div className="grid min-h-0 auto-rows-min gap-[18px] max-[720px]:gap-[14px]">
+  const pomodoroPanel = (
               <Panel
                 kind="pomodoro"
                 title="Pomodoro"
@@ -501,6 +500,9 @@ export function Workbench({ initial }: WorkbenchProps) {
                   onSetDuration={pomodoro.setDuration}
                 />
               </Panel>
+  );
+
+  const timeControlsPanel = (
               <Panel
                 kind="time-controls"
                 title="Time controls"
@@ -522,9 +524,60 @@ export function Workbench({ initial }: WorkbenchProps) {
                   onError={pushToast}
                 />
               </Panel>
-            </div>
-          </div>
-        </div>
+  );
+
+  return (
+    // ADR-0013 rule 2 — `min-h-0` on every link of the layout chain so flex
+    // children can shrink below their content (the body is already
+    // `h-screen overflow-hidden` — rule 1). `flex-1 min-h-0` makes the layout
+    // area exactly fill the space under the (flex-none) header; nothing
+    // overflows the viewport — each feed scrolls inside its own Panel.
+    <div className="flex h-screen min-h-0 flex-col">
+      <AppHeader connection={connection} now={now} />
+
+      {/*
+        Desktop (≥ lg / 1024px): the resizable Splitter tree. Every divider is
+        drag-resizable at any nesting depth; double-click a handle resets that
+        pair. Composition preserves the established hierarchy — Tasks prominent
+        on the left; the right side stacks Emails over (SMS + the
+        Pomodoro/Time-controls column).
+      */}
+      <div className="hidden min-h-0 min-w-0 flex-1 px-[22px] pb-[22px] pt-[18px] lg:block">
+        <Splitter
+          direction="row"
+          initialSizes={[1.15, 1]}
+          minPx={[360, 360]}
+          className="gap-0"
+        >
+          {tasksPanel}
+          <Splitter direction="col" initialSizes={[1, 1]} minPx={[200, 220]}>
+            {emailsPanel}
+            <Splitter direction="row" initialSizes={[1.4, 1]} minPx={[260, 240]}>
+              {smsPanel}
+              <Splitter direction="col" initialSizes={[1, 1]} minPx={[170, 170]}>
+                {pomodoroPanel}
+                {timeControlsPanel}
+              </Splitter>
+            </Splitter>
+          </Splitter>
+        </Splitter>
+      </div>
+
+      {/*
+        Small-screen fallback (< lg). The drag-resize spec is desktop-oriented
+        and the Splitter `minPx` clamps make 5 panes un-fittable on a phone, so
+        below the breakpoint we drop the Splitter entirely and stack all five
+        panels vertically. The stack is the page's ONE scroll region
+        (`overflow-y-auto`, the body stays `overflow-hidden`); each panel keeps
+        a sensible min-height so every section stays reachable — the brief's
+        "all sections visible/reachable" intent is preserved on mobile.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col gap-[14px] overflow-y-auto p-[14px] lg:hidden">
+        <div className="min-h-[440px] shrink-0">{tasksPanel}</div>
+        <div className="min-h-[340px] shrink-0">{emailsPanel}</div>
+        <div className="min-h-[300px] shrink-0">{smsPanel}</div>
+        <div className="min-h-[260px] shrink-0">{pomodoroPanel}</div>
+        <div className="min-h-[240px] shrink-0">{timeControlsPanel}</div>
       </div>
 
       {/* Focus mode suppresses toast popups (the queue is untouched — nothing
