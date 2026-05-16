@@ -39,7 +39,7 @@ describe("createStore — addTask", () => {
 
     expect(email.kind).toBe("immediate");
     expect(email.taskId).toBe(task.id);
-    expect(email.pendingTitles).toBeNull();
+    expect(email.pending).toBeNull();
     expect("emailCycle" in email).toBe(false);
     expect(email.subject).toContain("Buy milk");
     expect(email.body).toContain("Buy milk");
@@ -102,24 +102,36 @@ describe("createStore — completeTask", () => {
 });
 
 describe("createStore — appendSummaryEmail", () => {
-  it("fires with 0 pending tasks (pendingTitles [])", () => {
+  it("fires with 0 pending tasks (pending [])", () => {
     const store = createStore(CONFIG);
     const email = store.appendSummaryEmail();
     expect(EmailSchema.safeParse(email).success).toBe(true);
     expect(email.kind).toBe("summary");
     expect(email.taskId).toBeNull();
-    expect(email.pendingTitles).toEqual([]);
+    expect(email.pending).toEqual([]);
     expect(email.body).toContain("No pending tasks.");
   });
 
-  it("lists current pending titles", () => {
+  it("carries pending {id,title} pairs for the current pending tasks (ADR-0010)", () => {
     const store = createStore(CONFIG);
-    store.addTask("Alpha");
-    store.addTask("Beta");
+    const { task: alpha } = store.addTask("Alpha");
+    const { task: beta } = store.addTask("Beta");
     const email = store.appendSummaryEmail();
-    expect(email.pendingTitles).toEqual(["Alpha", "Beta"]);
+    expect(email.pending).toEqual([
+      { id: alpha.id, title: "Alpha" },
+      { id: beta.id, title: "Beta" },
+    ]);
     expect(email.body).toContain("Alpha");
     expect(email.body).toContain("Beta");
+  });
+
+  it("drops a task from `pending` once it is completed (round-trip is visible)", () => {
+    const store = createStore(CONFIG);
+    const { task: alpha } = store.addTask("Alpha");
+    const { task: beta } = store.addTask("Beta");
+    store.completeTask(alpha.id);
+    const email = store.appendSummaryEmail();
+    expect(email.pending).toEqual([{ id: beta.id, title: "Beta" }]);
   });
 });
 

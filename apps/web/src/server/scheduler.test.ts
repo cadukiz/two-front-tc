@@ -31,7 +31,7 @@ describe("createScheduler — summary email cadence (ADR-0009)", () => {
     const summaries = summaryEmails(store);
     expect(summaries).toHaveLength(10);
     for (const s of summaries) {
-      expect(s.pendingTitles).toEqual([]);
+      expect(s.pending).toEqual([]);
       expect("emailCycle" in s).toBe(false);
     }
   });
@@ -47,11 +47,11 @@ describe("createScheduler — summary email cadence (ADR-0009)", () => {
   it("summary email reflects pending titles created before the tick", () => {
     const store = createStore(CONFIG);
     const scheduler = createScheduler(store);
-    store.addTask("Alpha");
+    const { task: alpha } = store.addTask("Alpha");
     scheduler.tick();
     const summaries = summaryEmails(store);
     expect(summaries).toHaveLength(1);
-    expect(summaries[0]!.pendingTitles).toEqual(["Alpha"]);
+    expect(summaries[0]!.pending).toEqual([{ id: alpha.id, title: "Alpha" }]);
   });
 });
 
@@ -108,9 +108,10 @@ describe("createScheduler — Fibonacci SMS cadence (ADR-0004/0009)", () => {
 
 describe("createScheduler — Fibonacci reset (ADR-0009, days × 1440)", () => {
   it("restarts the sequence after fibonacciResetDays days; no SMS on the reset minute", () => {
-    // Use a 100-min window so the test stays small but still day-derived: with
-    // tickMs irrelevant here, the window in minutes = days × 1440. Pick days=1
-    // and drive enough ticks; assert the reset bumps the cycle and re-anchors.
+    // `fibonacciResetDays: 1` ⇒ a 1440-minute reset window (days × 1440).
+    // `scheduler.tick()` advances one simulated minute regardless of `tickMs`
+    // (no real timers here), so we drive 1440 ticks; assert the reset bumps
+    // the cycle on minute 1440 and the sequence re-anchors at minute 1441.
     const store = createStore({ ...CONFIG, fibonacciResetDays: 1 });
     const scheduler = createScheduler(store);
     const windowMin = 1 * MINUTES_PER_DAY; // 1440

@@ -16,10 +16,14 @@ export const EmailSchema = z.object({
    */
   taskId: IdSchema.nullable(),
   /**
-   * `summary` → snapshot of pending task titles at send time. May be empty:
-   * empty summaries still fire (ADR-0004). `null` for `immediate`.
+   * `summary` → snapshot of the pending tasks at send time as `{ id, title }`
+   * pairs (the `id` makes each listed task unambiguously completable from the
+   * email action — ADR-0010; a bare title is not unique). May be empty: empty
+   * summaries still fire (ADR-0004). `null` for `immediate`.
    */
-  pendingTitles: z.array(z.string()).nullable(),
+  pending: z
+    .array(z.object({ id: IdSchema, title: z.string() }))
+    .nullable(),
   /** Epoch ms — display only. */
   createdAt: z.number().int().nonnegative(),
 });

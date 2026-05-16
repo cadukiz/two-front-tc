@@ -112,7 +112,12 @@ export function createStore(config: Config): Store {
     }
   };
 
-  const pendingTitles = (): string[] =>
+  const pendingTasks = (): { id: string; title: string }[] =>
+    tasks
+      .filter((t) => t.status === "pending")
+      .map((t) => ({ id: t.id, title: t.title }));
+
+  const pendingTitleList = (): string[] =>
     tasks.filter((t) => t.status === "pending").map((t) => t.title);
 
   const renderList = (titles: string[]): string =>
@@ -147,7 +152,7 @@ export function createStore(config: Config): Store {
         subject: `New task: "${title}"`,
         body: `A new task "${title}" was created.\nUse this email's action link to mark it complete.`,
         taskId: task.id,
-        pendingTitles: null,
+        pending: null,
         createdAt: Date.now(),
       };
       emails.push(email);
@@ -180,15 +185,15 @@ export function createStore(config: Config): Store {
     },
 
     appendSummaryEmail(): Email {
-      const titles = pendingTitles();
+      const pending = pendingTasks();
       const email: Email = {
         id: crypto.randomUUID(),
         seq: nextSeq(),
         kind: "summary",
         subject: "Pending tasks summary",
-        body: `Pending tasks summary:\n${renderList(titles)}`,
+        body: `Pending tasks summary:\n${renderList(pending.map((t) => t.title))}`,
         taskId: null,
-        pendingTitles: titles,
+        pending,
         createdAt: Date.now(),
       };
       emails.push(email);
@@ -199,7 +204,7 @@ export function createStore(config: Config): Store {
     },
 
     appendSms(args: { fibIndex: number; fibMinute: number }): Sms {
-      const titles = pendingTitles();
+      const titles = pendingTitleList();
       const record: Sms = {
         id: crypto.randomUUID(),
         seq: nextSeq(),

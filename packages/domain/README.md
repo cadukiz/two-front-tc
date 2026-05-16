@@ -25,7 +25,7 @@ import {
 | Entity | Fields |
 |---|---|
 | **Task** (`task.ts`) | `id` · `seq` (ordering key) · `title` · `status` `"pending"\|"completed"` · `createdAt` (epoch ms, display only — drives "time age") · `completedAt` (epoch ms\|null) |
-| **Email** (`email.ts`) | `id` · `seq` · `kind` `"immediate"\|"summary"` · `subject` · `body` · `taskId` (uuid\|null — set iff immediate; drives the "Mark complete" link) · `pendingTitles` (string[]\|null — set iff summary; may be empty) · `createdAt` |
+| **Email** (`email.ts`) | `id` · `seq` · `kind` `"immediate"\|"summary"` · `subject` · `body` · `taskId` (uuid\|null — set iff immediate; drives the "Mark complete" link) · `pending` (`{id,title}[]`\|null — set iff summary; may be empty; the `id` makes each listed task completable from the email action, ADR-0010) · `createdAt` |
 | **Sms** (`sms.ts`) | `id` · `seq` · `body` · `pendingTitles` (string[]) · `fibCycle` (advances every `fibonacciResetDays` days) · `fibIndex` (1-based pos in cycle) · `fibMinute` (= `F(fibIndex) × smsBaseIntervalMinutes`, the gap used) · `createdAt` |
 | **Snapshot** (`snapshot.ts`) | `tasks[]` · `emails[]` · `sms[]` · `lastSeq` (reconnect dedupe) · `config` (the 3 user-facing ints — `RuntimeConfig`, NOT `tickMs`) |
 | **SseEvent** (`events.ts`) | discriminated union on `type`: `snapshot` \| `task.created` \| `task.completed` \| `email.created` \| `sms.created` \| `config.updated`; each carries `seq` + `data` |
